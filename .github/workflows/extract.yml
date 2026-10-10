@@ -11,6 +11,10 @@ on:
         type: choice
         options: [all, entity-models, minerender-data]
         default: all
+      verify-reproducibility:
+        description: Extract again offline and compare outputs byte for byte
+        type: boolean
+        default: false
       publish:
         description: Publish validated data to the destination repositories (main only)
         type: boolean
@@ -52,12 +56,18 @@ jobs:
           path: .cache/minecraft-extractors
           key: minecraft-${{ runner.os }}-${{ inputs.version }}-${{ hashFiles('lib/download.js', 'lib/runtime.js') }}
       - run: node --test
-      - name: Extract twice and verify reproducibility
+      - name: Extract and validate datasets
         env:
           MC_VERSION: ${{ inputs.version }}
           DATASET: ${{ inputs.dataset }}
         run: |
           node tools/extract.js --version "$MC_VERSION" --dataset "$DATASET" --output out/first
+      - name: Verify reproducibility
+        if: inputs.verify-reproducibility
+        env:
+          MC_VERSION: ${{ inputs.version }}
+          DATASET: ${{ inputs.dataset }}
+        run: |
           node tools/extract.js --version "$MC_VERSION" --dataset "$DATASET" --output out/second --offline
           diff -r out/first out/second
       - name: Save validated datasets

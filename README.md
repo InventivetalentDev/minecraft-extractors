@@ -47,7 +47,7 @@ The CLI also runs under a VPS scheduler. `node tools/versions.js --repository ..
 
 ## Manual GitHub execution
 
-The **Extract Minecraft datasets** workflow uses a standard GitHub-hosted Ubuntu runner and accepts a version, dataset selection, and an optional publishing flag. It runs tests, extracts twice, and compares every output byte. Its default is extraction and validation only; validated output is available as a downloadable artifact for three days. The workflow supports modern extraction; use the CLI for 1.16.5 with the original dumps.
+The **Extract Minecraft datasets** workflow uses a standard GitHub-hosted Ubuntu runner and accepts a version, dataset selection, and an optional publishing flag. It runs tests, then extracts and validates each selected dataset once. Enable `verify-reproducibility` to extract again offline and compare every output byte; this option is off by default. Publishing is also off by default, and validated output is available as a downloadable artifact for three days. The workflow supports modern extraction; use the CLI for 1.16.5 with the original dumps.
 
 Publishing is allowed only from `main`. Configure a GitHub App installed on the two data repositories with **Contents: read and write**, then set the repository variable `DATA_APP_CLIENT_ID` and secret `DATA_APP_PRIVATE_KEY`. The workflow creates a short-lived token restricted to those repositories after successful validation. No publishing credentials are needed for extraction-only runs. Pull requests do not trigger this workflow.
 
