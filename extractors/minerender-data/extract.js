@@ -8,11 +8,13 @@ import { isMain } from '../../lib/identity.js';
 import { DATASETS, extractorIdentity, versionId, writeJson } from './lib.js';
 import { validateRuntime, validateFixtures, validateDirectory } from './validation.js';
 import { buildRules, UnsupportedRulesVersionError } from './rules.js';
+import { assertSupportedVersion } from './support.js';
 
 const directory = fileURLToPath(new URL('./', import.meta.url));
 
 export async function extract(version, output, options = {}) {
   versionId(version);
+  assertSupportedVersion(version);
   output = path.resolve(output);
   if (await exists(output)) throw new Error(`Output directory already exists: ${output}`);
   const runtime = options.runtime ?? await prepareRuntime(version, options);
@@ -60,7 +62,7 @@ export async function extract(version, output, options = {}) {
       await writeFile(options.fixtures, await readFile(fixturesFile));
     }
     await rename(destination, output);
-    console.log(`${version}: ${Object.keys(datasets).length} datasets, ${Object.keys(data.itemDefaults).length} items, ${Object.keys(data.blockStates).length} blocks; ${checks.itemSamples} native item samples checked → ${output}`);
+    console.log(`${version}: ${Object.keys(datasets).length} datasets, ${Object.keys(data.itemDefaults).length} items, ${Object.keys(data.blockStates).length} blocks; ${checks.itemSamples} native item samples checked${options.logOutput === false ? '' : ` → ${output}`}`);
     return manifest;
   } finally {
     await rm(scratch, { recursive: true, force: true });

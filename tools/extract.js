@@ -5,6 +5,7 @@ import { datasetNames, validateDataset } from '../lib/datasets.js';
 import { isMain, versionId } from '../lib/identity.js';
 import { exists } from '../lib/download.js';
 import { prepareRuntime } from '../lib/runtime.js';
+import { assertSupportedVersion } from '../extractors/minerender-data/support.js';
 
 export async function extractDatasets(version, output, options = {}) {
   versionId(version);
@@ -13,6 +14,7 @@ export async function extractDatasets(version, output, options = {}) {
   if (legacy && (datasets.includes('minerender-data') || !options.entityDump || !options.blockEntityDump)) {
     throw new Error('Minecraft 1.16.5 requires --dataset entity-models, --entity-dump FILE and --block-entity-dump FILE');
   }
+  if (datasets.includes('minerender-data')) assertSupportedVersion(version);
   if (options.fixtures && !datasets.includes('minerender-data')) throw new Error('--fixtures requires minerender-data');
   output = path.resolve(output);
   if (options.fixtures) {
@@ -31,18 +33,19 @@ export async function extractDatasets(version, output, options = {}) {
       if (dataset === 'entity-models') {
         if (legacy) {
           const { convertLegacyFiles } = await import('../extractors/entity-models/convert-legacy.js');
-          await convertLegacyFiles([options.entityDump, options.blockEntityDump], destination, options);
+          await convertLegacyFiles([options.entityDump, options.blockEntityDump], destination, { ...options, logOutput: false });
         } else {
           const { extract } = await import('../extractors/entity-models/extract.js');
-          await extract(version, destination, { ...options, runtime });
+          await extract(version, destination, { ...options, runtime, logOutput: false });
         }
       } else {
         const { extract } = await import('../extractors/minerender-data/extract.js');
-        await extract(version, destination, { ...options, runtime });
+        await extract(version, destination, { ...options, runtime, logOutput: false });
       }
       await validateDataset(dataset, destination, version);
     }
     await rename(scratch, output);
+    console.log(`${version}: ${datasets.join(', ')} → ${output}`);
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }

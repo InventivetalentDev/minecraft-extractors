@@ -197,7 +197,7 @@ export async function convertLegacyFiles(inputs, output, options = {}) {
   if (findings.length) throw new Error(findings.join('\n'));
   await writeDataset(output, entry, records, { blocks, animations });
   await writeFile(join(output, '_textures.report.json'), stableStringify(textures.report));
-  console.log(`Wrote ${records.length} models to ${output}; ${skipped} legacy dump entries were empty before runtime additions; preserved part texture sizes for ${mixedTextureSizes} models with mixed sizes.`);
+  console.log(`Wrote ${records.length} models${options.logOutput === false ? '' : ` to ${output}`}; ${skipped} legacy dump entries were empty before runtime additions; preserved part texture sizes for ${mixedTextureSizes} models with mixed sizes.`);
   console.log(`${textures.withTexture} models with a texture; ${textures.withoutTexture} without.`);
   console.log(`${Object.keys(blocks).length} block entries; ${animations.length} animation files.`);
 }

@@ -78,7 +78,7 @@ export async function extract(version, output, options = {}) {
     for (const finding of findings) console.warn(`Animation mapping: ${finding}`);
     const count = await writeDataset(output, entry, records, { blocks, animations });
     await writeFile(path.join(output, '_textures.report.json'), stableStringify(textures.report));
-    console.log(`${entry.id}: ${count - animations.length} models, ${animations.length} animation files → ${output}`);
+    console.log(`${entry.id}: ${count - animations.length} models, ${animations.length} animation files${options.logOutput === false ? '' : ` → ${output}`}`);
     console.log(`${textures.withTexture} models with a texture; ${textures.withoutTexture} without.`);
   } finally {
     await rm(extracted, { force: true });
