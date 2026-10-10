@@ -110,6 +110,7 @@ jobs:
         env:
           MC_VERSION: ${{ inputs.version }}
           DATASET: ${{ inputs.dataset }}
+          DATASET_PURGE_TOKEN: ${{ secrets.DATASET_PURGE_TOKEN }}
         run: |
           for dataset in entity-models minerender-data; do
             if [ "$DATASET" = all ] || [ "$DATASET" = "$dataset" ]; then
