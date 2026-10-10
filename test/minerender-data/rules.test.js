@@ -72,6 +72,10 @@ test('reviewed releases select their block names and preserve cauldron levels', 
     for (const level of [1, 2, 3]) {
       assert.equal(blocks[`118:${level}`], `minecraft:${splitCauldron ? 'water_cauldron' : 'cauldron'}[level=${level}]`, version);
     }
+    for (let metadata = 0; metadata < 16; metadata++) {
+      const expected = `minecraft:tripwire[disarmed=${!!(metadata & 8)},east=false,powered=${!!(metadata & 1)},south=false,north=false,west=false,attached=${!!(metadata & 4)}]`;
+      assert.equal(blocks[`132:${metadata}`], expected, `${version}, tripwire ${metadata}`);
+    }
     assert.equal(Object.keys(rules.provenance.legacyBlocks.corrections).length, count, version);
     assert.equal(Object.hasOwn(rules.blockTints, 'minecraft:cauldron'), !splitCauldron, version);
     assert.equal(Object.hasOwn(rules.provenance.blockTints, 'aliases'), !splitCauldron, version);
