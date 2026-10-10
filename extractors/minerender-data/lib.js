@@ -11,6 +11,10 @@ export const DATASETS = {
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
+export function isImpliedItemDefault(components) {
+  return Object.keys(components).length === 1 && components['minecraft:max_stack_size'] === 64;
+}
+
 export function stableStringify(value) {
   const sort = entry => Array.isArray(entry) ? entry.map(sort)
     : entry && typeof entry === 'object' ? Object.fromEntries(Object.keys(entry).sort().map(key => [key, sort(entry[key])])) : entry;

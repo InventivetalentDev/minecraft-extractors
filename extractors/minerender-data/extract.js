@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util';
 import { prepareRuntime, run } from '../../lib/runtime.js';
 import { exists } from '../../lib/download.js';
 import { isMain } from '../../lib/identity.js';
-import { DATASETS, extractorIdentity, versionId, writeJson } from './lib.js';
+import { DATASETS, extractorIdentity, isImpliedItemDefault, versionId, writeJson } from './lib.js';
 import { validateRuntime, validateFixtures, validateDirectory } from './validation.js';
 import { buildRules, UnsupportedRulesVersionError } from './rules.js';
 import { assertSupportedVersion } from './support.js';
@@ -40,8 +40,9 @@ export async function extract(version, output, options = {}) {
     await mkdir(destination);
     const datasets = {};
     for (const [name, file] of Object.entries(DATASETS)) {
-      const value = data[name] ?? rules?.[name];
+      let value = data[name] ?? rules?.[name];
       if (value === undefined) continue;
+      if (name === 'itemDefaults') value = Object.fromEntries(Object.entries(value).filter(([, components]) => !isImpliedItemDefault(components)));
       datasets[name] = {
         ...await writeJson(destination, file, value),
         provenance: rules?.provenance[name] ?? { kind: 'vanilla-runtime', registry: name }
