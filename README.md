@@ -21,15 +21,13 @@ Version support belongs to each extractor. Registry extraction supports **1.16.5
 
 Entity extraction retains the reviewed 1.17.1, 1.20.1, 1.21.11, and 26.1.2 adapters, native extraction for other compatible releases, and the separate 1.16.5 conversion path. A successful native-only run does not include unreviewed procedural animations or block-model variants. Extraction always uses the requested version's runtime; it does not substitute another version's output.
 
-For Minecraft 1.16.5 registry data, use `--dataset minerender-data`. Entity extraction requires the original [entity dump](https://raw.githubusercontent.com/InventivetalentDev/MineRender/08a79ec11ab236884f78906a3b593b402e987667/packages/minerender/src/entity/entityModels.json) and [block-entity dump](https://raw.githubusercontent.com/InventivetalentDev/MineRender/08a79ec11ab236884f78906a3b593b402e987667/packages/minerender/src/entity/blockEntityModels.json). The converter augments them using the pinned Yarn runtime:
+Minecraft 1.16.5 entity extraction generates its dictionaries from the pinned Yarn runtime, then augments them with render layers and animations. Both datasets work through the same command:
 
 ```sh
-node tools/extract.js --version 1.16.5 --dataset entity-models \
-  --entity-dump entityModels.json --block-entity-dump blockEntityModels.json \
-  --output out/1.16.5
+node tools/extract.js --version 1.16.5 --output out/1.16.5
 ```
 
-`--legacy-cache DIR` selects an existing Yarn tool cache. The direct converter remains available at `extractors/entity-models/convert-legacy.js`. `--fixtures FILE` retains native registry validation samples outside the output directory, for example `--fixtures out/fixtures-1.21.11.json`.
+To use existing dictionaries, supply both `--entity-dump FILE` and `--block-entity-dump FILE`. `--legacy-cache DIR` selects an existing Yarn tool cache. The direct converter accepts optional dump paths: `node extractors/entity-models/convert-legacy.js [entityModels.json blockEntityModels.json] --output DIR`. `--fixtures FILE` retains native registry validation samples outside the output directory, for example `--fixtures out/fixtures-1.21.11.json`.
 
 Registry validation checks item defaults and potion colors against each release's native APIs. Minecraft 1.16.5 does not expose native durability-bar methods; its manifest lists that check under `validation.unavailableChecks`. Its item stack, damage, and potion checks still run.
 
@@ -53,7 +51,7 @@ The CLI also runs under a VPS scheduler. `node tools/versions.js --repository ..
 
 ## Manual GitHub execution
 
-The **Extract Minecraft datasets** workflow uses a standard GitHub-hosted Ubuntu runner and accepts a version, dataset selection, and an optional publishing flag. It runs tests, then extracts and validates each selected dataset once. Enable `verify-reproducibility` to extract again offline and compare every output byte; this option is off by default. Publishing is also off by default, and validated output is available as a downloadable artifact for three days. For 1.16.5, select `minerender-data`; entity extraction requires the CLI and original dumps.
+The **Extract Minecraft datasets** workflow uses a standard GitHub-hosted Ubuntu runner and accepts a version, dataset selection, and an optional publishing flag. It runs tests, then extracts and validates each selected dataset once. Enable `verify-reproducibility` to extract again offline and compare every output byte; this option is off by default. Publishing is also off by default, and validated output is available as a downloadable artifact for three days.
 
 Publishing is allowed only from `main`. Configure a GitHub App installed on the two data repositories with **Contents: read and write**, then set the repository variable `DATA_APP_CLIENT_ID` and secret `DATA_APP_PRIVATE_KEY`. The workflow creates a short-lived token restricted to those repositories after successful validation. No publishing credentials are needed for extraction-only runs. Pull requests do not trigger this workflow.
 

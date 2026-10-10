@@ -17,7 +17,7 @@ const TOOLS = [
 ];
 
 export async function extractLegacyData(options) {
-  const runtime = await prepareLegacyRuntime(options);
+  const runtime = options.legacyRuntime ?? await prepareLegacyRuntime(options);
   try {
     const output = path.join(runtime.directory, 'models.json');
     const args = ['-Djava.awt.headless=true', '--class-path', runtime.classpath,
@@ -50,20 +50,29 @@ export async function extractLegacyData(options) {
     });
     return JSON.parse(await readFile(output, 'utf8'));
   } finally {
-    await runtime.dispose();
+    if (!options.legacyRuntime) await runtime.dispose();
   }
+}
+
+export async function extractLegacyDumps(runtime) {
+  const output = path.join(runtime.directory, 'dumps');
+  await run(javaTool('java'), ['-Djava.awt.headless=true', '--class-path', runtime.classpath,
+    fileURLToPath(new URL('./ExtractModelDumps.java', import.meta.url)), output],
+  { cwd: runtime.directory, maxBuffer: 8 * 1024 * 1024 });
+  return Promise.all(['entityModels.json', 'blockEntityModels.json'].map(async file =>
+    JSON.parse(await readFile(path.join(output, file), 'utf8'))));
 }
 
 // Yarn's field names preserve the bone names in the original 1.16.5 dictionaries.
 export async function prepareLegacyRuntime({ cache, offline = false, legacyCache = path.join(cache, 'yarn-1.16.5'),
-  metadata, clientJar }) {
+  metadata, clientJar, libraries }) {
   cache = path.resolve(cache);
   legacyCache = path.resolve(legacyCache);
   if (clientJar) clientJar = path.resolve(clientJar);
   const versionDirectory = path.join(cache, '1.16.5');
   metadata ??= (await loadVersion('1.16.5', cache, offline)).metadata;
   clientJar ??= await downloadClient(metadata, versionDirectory, offline);
-  const libraries = await downloadLibraries(metadata.libraries, cache, offline);
+  libraries ??= await downloadLibraries(metadata.libraries, cache, offline);
   for (const [name, url, checksum] of TOOLS) await download(url, path.join(legacyCache, name), checksum, offline);
   const remapKey = sha1(JSON.stringify({ client: metadata.downloads.client.sha1,
     tools: TOOLS.map(([, , checksum]) => checksum), libraries: libraries.map(file => path.basename(file)), fixPackageAccess: true }));
