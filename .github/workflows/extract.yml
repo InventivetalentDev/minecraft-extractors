@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Exact Minecraft version (1.16.5 requires minerender-data)
+        description: Exact Minecraft version
         type: string
         required: true
       dataset:
@@ -54,7 +54,9 @@ jobs:
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: .cache/minecraft-extractors
-          key: minecraft-${{ runner.os }}-${{ inputs.version }}-${{ hashFiles('lib/download.js', 'lib/runtime.js') }}
+          key: minecraft-${{ runner.os }}-${{ inputs.version }}-${{ hashFiles('lib/download.js', 'lib/runtime.js', 'extractors/entity-models/legacy-runtime.js') }}-${{ inputs.dataset }}
+          restore-keys: |
+            minecraft-${{ runner.os }}-${{ inputs.version }}-${{ hashFiles('lib/download.js', 'lib/runtime.js', 'extractors/entity-models/legacy-runtime.js') }}-
       - run: node --test
       - name: Extract and validate datasets
         env:

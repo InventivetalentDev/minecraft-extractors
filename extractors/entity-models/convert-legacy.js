@@ -5,7 +5,7 @@ import { stableStringify, validateModel, writeDataset } from './lib.js';
 import { addTextures, validateTextures } from './textures.js';
 import { applyTransforms } from './transform.js';
 import { DEFAULT_CACHE, downloadClient, exists, loadVersion } from '../../lib/download.js';
-import { extractLegacyData } from './legacy-runtime.js';
+import { extractLegacyData, extractLegacyDumps, prepareLegacyRuntime } from './legacy-runtime.js';
 import { listJar } from '../../lib/runtime.js';
 import { addLegacyBlockLayers, legacyBlockAnimations } from './legacy-blocks.js';
 import { applyLegacyPasses } from './legacy-passes.js';
@@ -158,23 +158,34 @@ async function main(args) {
       throw new Error(`Unknown or incomplete option: ${argument}`);
     }
   }
-  if (inputs.length !== 2 || !output) {
-    throw new Error('Usage: node extractors/entity-models/convert-legacy.js <entityModels.json> <blockEntityModels.json> --output DIR [--cache DIR] [--legacy-cache DIR] [--offline]');
+  if (![0, 2].includes(inputs.length) || !output) {
+    throw new Error('Usage: node extractors/entity-models/convert-legacy.js [<entityModels.json> <blockEntityModels.json>] --output DIR [--cache DIR] [--legacy-cache DIR] [--offline]');
   }
   return convertLegacyFiles(inputs, output, options);
 }
 
 export async function convertLegacyFiles(inputs, output, options = {}) {
-  if (!Array.isArray(inputs) || inputs.length !== 2) throw new Error('Expected entity and block-entity dump paths');
+  if (!Array.isArray(inputs) || ![0, 2].includes(inputs.length)) {
+    throw new Error('Provide both entity and block-entity dump paths, or omit both to extract them');
+  }
   output = resolve(output);
   options = { ...options, cache: resolve(options.cache || DEFAULT_CACHE), offline: options.offline ?? false };
   if (await exists(output)) throw new Error(`Output directory already exists: ${output}`);
-  const dumps = await Promise.all(inputs.map(async input => JSON.parse(await readFile(input, 'utf8'))));
-  const { records, skipped, mixedTextureSizes } = convertLegacy(...dumps);
+  const dumps = inputs.length ? await Promise.all(inputs.map(async input => JSON.parse(await readFile(input, 'utf8')))) : undefined;
+  let converted = dumps ? convertLegacy(...dumps) : undefined;
   const { cache, offline } = options;
-  const { entry, metadata, directory } = await loadVersion('1.16.5', cache, offline);
-  const clientJar = await downloadClient(metadata, directory, offline);
-  const runtime = await extractLegacyData({ ...options, metadata, clientJar });
+  const { entry, metadata, directory } = options.runtime ?? await loadVersion('1.16.5', cache, offline);
+  if (entry.id !== '1.16.5' || metadata.id !== '1.16.5') throw new Error('The legacy converter requires a Minecraft 1.16.5 runtime');
+  const clientJar = options.runtime?.clientJar ?? await downloadClient(metadata, directory, offline);
+  const legacyRuntime = await prepareLegacyRuntime({ ...options, metadata, clientJar, libraries: options.runtime?.libraries });
+  let runtime;
+  try {
+    converted ??= convertLegacy(...await extractLegacyDumps(legacyRuntime));
+    runtime = await extractLegacyData({ ...options, legacyRuntime });
+  } finally {
+    await legacyRuntime.dispose();
+  }
+  const { records, skipped, mixedTextureSizes } = converted;
   addLegacyRuntimeLayers(records, runtime.models);
   const blockIds = listBlockIds(await listJar(clientJar));
   const blockFamilies = await addLegacyBlockLayers(records, blockIds);

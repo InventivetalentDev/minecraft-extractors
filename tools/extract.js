@@ -11,8 +11,9 @@ export async function extractDatasets(version, output, options = {}) {
   versionId(version);
   const datasets = datasetNames(options.dataset);
   const legacy = version === '1.16.5';
-  if (legacy && datasets.includes('entity-models') && (!options.entityDump || !options.blockEntityDump)) {
-    throw new Error('Minecraft 1.16.5 entity extraction requires --entity-dump FILE and --block-entity-dump FILE; use --dataset minerender-data for registry-only extraction');
+  const dumps = [options.entityDump, options.blockEntityDump].filter(input => input !== undefined);
+  if (legacy && datasets.includes('entity-models') && dumps.length === 1) {
+    throw new Error('Provide both --entity-dump FILE and --block-entity-dump FILE, or omit both to extract them');
   }
   if (datasets.includes('minerender-data')) assertSupportedVersion(version);
   if (options.fixtures && !datasets.includes('minerender-data')) throw new Error('--fixtures requires minerender-data');
@@ -33,7 +34,7 @@ export async function extractDatasets(version, output, options = {}) {
       if (dataset === 'entity-models') {
         if (legacy) {
           const { convertLegacyFiles } = await import('../extractors/entity-models/convert-legacy.js');
-          await convertLegacyFiles([options.entityDump, options.blockEntityDump], destination, { ...options, logOutput: false });
+          await convertLegacyFiles(dumps, destination, { ...options, runtime, logOutput: false });
         } else {
           const { extract } = await import('../extractors/entity-models/extract.js');
           await extract(version, destination, { ...options, runtime, logOutput: false });
