@@ -18,13 +18,14 @@ const stationary = { getFallFlyingTicks: 0, isVisuallySwimming: false, isUsingIt
   getMainArm: 'RIGHT', getUsedItemHand: 'MAIN_HAND', isCrouching: false,
   getDeltaMovement: vector(), 'getItemBySlot(net.minecraft.world.entity.EquipmentSlot)': emptyItem };
 
-// These signatures and getter inputs follow the mapped 1.17.1 and 1.20.1 model methods.
+// These signatures and getter inputs follow the mapped entity-driven model methods.
 // Entity fixtures describe a preview state; they do not advance gameplay or select equipment.
 export function classicAnimations(version, records) {
-  if (extractionAdapter(version).procedural !== 'classic') return [];
+  const adapter = extractionAdapter(version);
+  if (adapter.procedural !== 'classic') return [];
   const layers = new Map(records.map(record => [record.id, record.layers]));
   const requests = classicBlockAnimations([...layers.keys()]);
-  const ground = version === '1.17.1' ? 'isOnGround' : 'onGround';
+  const ground = adapter.groundGetter;
   function add(model, ids, clips, options = {}) {
     const models = ids.map(id => `minecraft:${id}`).filter(id => layers.has(id));
     if (!models.length) return;
@@ -80,6 +81,7 @@ export function classicAnimations(version, records) {
   add('StriderModel', ['strider'], { idle: cycle(0.2, entity('monster.Strider', { isVehicle: false })) });
   add('PhantomModel', ['phantom'], { fly: cycle(f(7.448451) * f(0.017453292),
     entity('monster.Phantom', { getUniqueFlapTickOffset: 0 })) });
+  add('WindChargeModel', ['wind_charge'], { spin: clip(22.5 / 20, true, time => args(null, 0, 0, time * 20)) });
   add('BeeModel', ['bee'], {
     fly: cycle(0.06, entity('animal.Bee', { [ground]: false, getDeltaMovement: vector(), isAngry: false }), 360),
     fly_angry: cycle(f(120.32113) * f(0.017453292), entity('animal.Bee', { [ground]: false, getDeltaMovement: vector(), isAngry: true }), 360),
@@ -92,7 +94,7 @@ export function classicAnimations(version, records) {
   }, { parameters: [MODEL + 'ParrotModel$State', 'int', ...FLOATS],
     prepare: { method: 'prepare', parameters: [MODEL + 'ParrotModel$State'], arguments: [0] } });
   add('GoatModel', ['goat'], { walk_cycle: walk(entity('animal.goat.Goat', {
-    isBaby: false, getRammingXHeadRot: 0, ...(version === '1.20.1' ? { hasLeftHorn: true, hasRightHorn: true } : {}),
+    isBaby: false, getRammingXHeadRot: 0, ...(adapter.goatHorns ? { hasLeftHorn: true, hasRightHorn: true } : {}),
   })) });
   add('LlamaModel', ['llama', 'trader_llama'], { walk_cycle: walk(entity('animal.horse.Llama', { hasChest: false, isBaby: false })) });
   add('PandaModel', ['panda'], { walk_cycle: walk(entity('animal.Panda', {
@@ -102,10 +104,10 @@ export function classicAnimations(version, records) {
   add('FoxModel', ['fox'], { walk_cycle: walk(entity('animal.Fox', {
     isCrouching: false, isFaceplanted: false, isSleeping: false, isSitting: false, 'getHeadRollAngle(float)': 0, 'getCrouchAmount(float)': 0,
   })) }, prepare());
-  add('WolfModel', ['wolf'], { walk_cycle: walk(entity('animal.Wolf', {
+  add('WolfModel', ['wolf', 'wolf_armor'], { walk_cycle: walk(entity('animal.Wolf', {
     isAngry: false, isInSittingPose: false, 'getHeadRollAngle(float)': 0, 'getBodyRollAngle(float,float)': 0,
   })) }, prepare());
-  add('WolfModel', ['wolf'], { shake: clip(2, false, time => args(entity('animal.Wolf', {
+  add('WolfModel', ['wolf', 'wolf_armor'], { shake: clip(2, false, time => args(entity('animal.Wolf', {
     isAngry: false, isInSittingPose: false, 'getHeadRollAngle(float)': 0,
   }, { shakeAnimO: time, shakeAnim: time })), { samplesPerSecond: 240 }) }, prepare());
   add('HoglinModel', ['hoglin', 'zoglin'], { walk_cycle: walk(entity('monster.hoglin.Hoglin', { isBaby: false, getAttackAnimationRemainingTicks: 0 }), 1) });
@@ -163,6 +165,7 @@ export function classicAnimations(version, records) {
   const baseHumanoid = type => entity(type, { ...stationary, isAggressive: false, getMainHandItem: emptyItem, isLeftHanded: false });
   for (const [model, ids, type] of [
     ['SkeletonModel', ['skeleton', 'stray', 'wither_skeleton'], 'monster.Skeleton'],
+    ['BoggedModel', ['bogged'], 'monster.Bogged'],
     ['ZombieModel', ['zombie', 'husk'], 'monster.Zombie'], ['DrownedModel', ['drowned'], 'monster.Zombie'],
     ['GiantZombieModel', ['giant'], 'monster.Giant'], ['ZombieVillagerModel', ['zombie_villager'], 'monster.Zombie'],
     ['EndermanModel', ['enderman'], 'monster.EnderMan'],
@@ -180,12 +183,13 @@ export function classicAnimations(version, records) {
     walk_cycle: walk(entity('monster.Pillager', { getArmPose: 'NEUTRAL' })),
   });
   for (const request of [...requests]) {
-    const overlay = { CreeperModel: 'armor', CatModel: 'collar', DrownedModel: 'outer', SkeletonModel: 'outer',
+    const overlay = { CreeperModel: 'armor', CatModel: 'collar', DrownedModel: 'outer', SkeletonModel: 'outer', BoggedModel: 'outer',
       TropicalFishModelA: 'pattern', TropicalFishModelB: 'pattern' }[request.class.slice(MODEL.length)];
     const models = overlay && request.models.filter(id => layers.get(id)?.[overlay]);
     if (models?.length) requests.push({ ...request, models, layer: overlay,
+      ...(request.class === MODEL + 'BoggedModel' ? { class: MODEL + 'SkeletonModel' } : {}),
       clips: Object.fromEntries(Object.entries(request.clips).map(([name, animation]) => [`${name}_${overlay}`, animation])) });
-    if (!['SkeletonModel', 'ZombieModel', 'DrownedModel', 'GiantZombieModel', 'ZombieVillagerModel', 'PlayerModel', 'PiglinModel'].includes(request.class.slice(MODEL.length))) continue;
+    if (!['SkeletonModel', 'BoggedModel', 'ZombieModel', 'DrownedModel', 'GiantZombieModel', 'ZombieVillagerModel', 'PlayerModel', 'PiglinModel'].includes(request.class.slice(MODEL.length))) continue;
     for (const layer of ['inner_armor', 'outer_armor']) {
       const models = request.models.filter(id => layers.get(id)?.[layer]);
       if (!models.length) continue;

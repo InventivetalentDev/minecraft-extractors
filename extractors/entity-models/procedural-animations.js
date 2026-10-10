@@ -23,5 +23,5 @@ export function proceduralAnimations(version, records) {
       }
     }
   }
-  return proceduralRequests(requests);
+  return proceduralRequests(requests, records);
 }

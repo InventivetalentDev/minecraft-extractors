@@ -19,7 +19,7 @@ Version support belongs to each extractor. Registry extraction supports **1.16.5
 
 `item-defaults.json` describes per-item defaults. Before data components, `minecraft:enchantment_glint_override` is emitted only when the item's default stack has glint. A missing override does not mean every stack of that item lacks glint. In 1.16.5, 1.17.1, and 1.18.2, potions, splash potions, and lingering potions with effects have glint even though their default stacks do not. Consumers must evaluate that stack-dependent rule separately; Minecraft removed it in 1.19.4.
 
-Entity extraction retains the reviewed 1.17.1, 1.20.1, 1.21.11, and 26.1.2 adapters, native extraction for other compatible releases, and the separate 1.16.5 conversion path. A successful native-only run does not include unreviewed procedural animations or block-model variants. Extraction always uses the requested version's runtime; it does not substitute another version's output.
+Entity extraction includes reviewed geometry and animation adapters for **1.17.1, 1.18.2, 1.19.4, 1.20.1, 1.20.6, 1.21.5, 1.21.11, 26.1.2, 26.2, and 26.3**, native extraction for other compatible releases, and the separate 1.16.5 conversion path. Other patch releases are not covered by these reviewed adapters. A successful native-only run does not include unreviewed procedural animations or block-model variants. Extraction always uses the requested version's runtime; it does not substitute another version's output.
 
 Minecraft 1.16.5 entity extraction generates its dictionaries from the pinned Yarn runtime, then augments them with render layers and animations. Both datasets work through the same command:
 
