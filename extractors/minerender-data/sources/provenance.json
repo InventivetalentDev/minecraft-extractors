@@ -1,7 +1,7 @@
 {
   "block-tints.json": {
-    "source": "https://github.com/InventivetalentDev/MineRender/blob/1da970e6b4efb5d6c44ab420c71f98076ff505fd/packages/minerender/src/model/block/blockTints.json",
-    "sha256": "e1d4f62fcf6ecf787b170def794e634179ed37a0650a1b4023832df1e0c0d03a",
+    "source": "https://github.com/InventivetalentDev/MineRender/blob/a18a06eabc3332e40f919c20d7f60c54952cd4cf/packages/minerender/src/model/block/blockTints.json",
+    "sha256": "6484f895042379498da054abdea2be555589d4a8c168252f69eb3378c48d76b7",
     "reviewedTargets": [
       "1.16.5",
       "1.17.1",
@@ -16,7 +16,7 @@
       "26.3"
     ],
     "kind": "reviewed-preview-policy",
-    "description": "MineRender block-preview tint rules without biome context. Constant leaf and water colors are preview choices. Rules are included only when the target block registry contains the block.",
+    "description": "MineRender preview tint rules and biome color sources. Constant colors apply without biome context; biome fields select grass, foliage, dry foliage, or water colors during world rendering. Rules are included only when the target block registry contains the block.",
     "targetAliases": {
       "1.16.5": {
         "minecraft:cauldron": {

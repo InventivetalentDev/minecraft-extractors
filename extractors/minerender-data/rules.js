@@ -42,12 +42,15 @@ function buildBlockTints(source, blockStates, aliases) {
     if (!ID.test(block) || !rule || typeof rule !== 'object' || Array.isArray(rule)) {
       throw new Error(`block-tints: invalid rule for ${block}`);
     }
-    const keys = rule.source === 'constant' ? ['source', 'color', 'untinted'] : ['source', 'untinted'];
+    const keys = rule.source === 'constant' ? ['source', 'color', 'untinted', 'biome'] : ['source', 'untinted', 'biome'];
     if (Object.keys(rule).some(key => !keys.includes(key)) || !['constant', 'grass', 'redstone', 'stem'].includes(rule.source)) {
       throw new Error(`block-tints: invalid source or fields for ${block}`);
     }
     if (rule.source === 'constant' && (!Number.isInteger(rule.color) || rule.color < 0 || rule.color > 0xffffff)) {
       throw new Error(`block-tints: invalid RGB color for ${block}`);
+    }
+    if (rule.biome !== undefined && !['grass', 'foliage', 'dry_foliage', 'water'].includes(rule.biome)) {
+      throw new Error(`block-tints: invalid biome color source for ${block}`);
     }
     if (rule.untinted !== undefined && (!Array.isArray(rule.untinted) || rule.untinted.some(value => !Number.isInteger(value) || value < 0))) {
       throw new Error(`block-tints: invalid untinted indices for ${block}`);
