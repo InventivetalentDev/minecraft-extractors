@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { DATASETS, writeJson } from '../../extractors/minerender-data/lib.js';
-import { effectColor, validateRuntime, validateDirectory } from '../../extractors/minerender-data/validation.js';
+import { effectColor, validateRuntime, validateFixtures, validateDirectory } from '../../extractors/minerender-data/validation.js';
 
 function fixture() {
   return {
@@ -33,6 +33,57 @@ test('potion averages preserve amplifier weighting, invisible effects, and empty
   assert.equal(effectColor([{ id: 'minecraft:red', amplifier: 1 }, { id: 'minecraft:blue', amplifier: 0 }], colors), 0xaa0055);
   assert.equal(effectColor([{ id: 'minecraft:blue', amplifier: 9, show_particles: false }], colors), null);
   assert.equal(effectColor([], colors), null);
+});
+
+test('legacy potion colors preserve float rounding and distinguish empty from hidden effects', () => {
+  const colors = { 'minecraft:strength': 0xffc700, 'minecraft:unluck': 0xc0a44d };
+  const effects = [{ id: 'minecraft:strength', amplifier: 0 }, { id: 'minecraft:unluck', amplifier: 1 }];
+  assert.equal(effectColor(effects, colors), 14004019);
+  assert.equal(effectColor(effects, colors, true), 13938483);
+  assert.equal(effectColor(effects.map(effect => ({ ...effect, show_particles: false })), colors, true), 0);
+  assert.equal(effectColor([], colors, true), 3694022);
+});
+
+function nativeFixtures(version, potionColor) {
+  const data = fixture();
+  data.metadata.minecraftVersion = version;
+  data.itemDefaults = { 'minecraft:wooden_sword': { 'minecraft:max_stack_size': 1, 'minecraft:max_damage': 10, 'minecraft:damage': 0 } };
+  const samples = [1, 8, 16, 32, 64].map(count => ({ count, damage: 0, barVisible: false, barWidth: 13 }));
+  samples.push({ count: 1, damage: 5, barVisible: true, barWidth: 7 }, { count: 1, damage: 10, barVisible: true, barWidth: 0 });
+  return { data, native: { minecraftVersion: version,
+    items: { 'minecraft:wooden_sword': samples.map(sample => ({ ...sample, maxStackSize: 1, maxDamage: 10 })) },
+    potions: { 'minecraft:empty': potionColor }, effectMixtures: [] } };
+}
+
+test('native potion fixtures use the declared version and durability checks cannot be disabled', () => {
+  for (const [version, potionColor] of [['1.20.1', 3694022], ['1.20.6', null]]) {
+    const { data, native } = nativeFixtures(version, potionColor);
+    assert.deepEqual(validateFixtures(data, native), { itemSamples: 7, potionColors: 1, effectMixtures: 0 });
+    native.potions['minecraft:empty'] = potionColor === null ? 3694022 : null;
+    assert.throws(() => validateFixtures(data, native), /Native potion color differs/);
+    native.potions['minecraft:empty'] = potionColor;
+    native.capabilities = { itemBars: false };
+    assert.throws(() => validateFixtures(data, native), /capability/);
+    native.capabilities.itemBars = true;
+    delete native.items['minecraft:wooden_sword'][0].barWidth;
+    assert.throws(() => validateFixtures(data, native), /Native durability bar differs/);
+  }
+});
+
+test('1.16.5 reports unavailable durability checks and rejects invented native bar samples', () => {
+  const { data, native } = nativeFixtures('1.16.5', 3694022);
+  native.capabilities = { itemBars: false };
+  for (const sample of native.items['minecraft:wooden_sword']) {
+    delete sample.barVisible;
+    delete sample.barWidth;
+  }
+  assert.deepEqual(validateFixtures(data, native), { itemSamples: 7, potionColors: 1, effectMixtures: 0,
+    unavailableChecks: { durabilityBars: 'Minecraft 1.16.5 does not expose native durability bar methods.' } });
+  native.items['minecraft:wooden_sword'][0].barVisible = false;
+  assert.throws(() => validateFixtures(data, native), /Unexpected native durability bar sample/);
+  delete native.items['minecraft:wooden_sword'][0].barVisible;
+  delete native.capabilities;
+  assert.throws(() => validateFixtures(data, native), /capability/);
 });
 
 test('publication validation rejects tampering, version mismatches, and undeclared datasets', async t => {

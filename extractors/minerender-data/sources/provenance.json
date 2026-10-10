@@ -3,18 +3,52 @@
     "source": "https://github.com/InventivetalentDev/MineRender/blob/1da970e6b4efb5d6c44ab420c71f98076ff505fd/packages/minerender/src/model/block/blockTints.json",
     "sha256": "e1d4f62fcf6ecf787b170def794e634179ed37a0650a1b4023832df1e0c0d03a",
     "reviewedTargets": [
+      "1.16.5",
+      "1.17.1",
+      "1.18.2",
+      "1.19.4",
+      "1.20.1",
+      "1.20.6",
       "1.21.5",
-      "1.21.11"
+      "1.21.11",
+      "26.1.2",
+      "26.2",
+      "26.3"
     ],
     "kind": "reviewed-preview-policy",
-    "description": "MineRender block-preview tint rules without biome context. Constant leaf and water colors are preview choices. Rules are included only when the target block registry contains the block."
+    "description": "MineRender block-preview tint rules without biome context. Constant leaf and water colors are preview choices. Rules are included only when the target block registry contains the block.",
+    "targetAliases": {
+      "1.16.5": {
+        "minecraft:cauldron": {
+          "from": "minecraft:water_cauldron",
+          "properties": {
+            "level": [
+              0,
+              1,
+              2,
+              3
+            ]
+          },
+          "reason": "Before Minecraft 1.17, filled cauldrons use cauldron with a level property. Only their water faces are tinted."
+        }
+      }
+    }
   },
   "legacy-blocks.json": {
     "source": "https://github.com/InventivetalentDev/MineRender/blob/2b4f3c3afb2e2107d2e7f7e4d1d2b2a8605f448e/packages/minerender/src/model/multiblock/legacyBlocks.json",
     "sha256": "50d1b0714ac6985b4d7252d90f253383575216cbd458393c95c197c5f9f26313",
     "reviewedTargets": [
+      "1.16.5",
+      "1.17.1",
+      "1.18.2",
+      "1.19.4",
+      "1.20.1",
+      "1.20.6",
       "1.21.5",
-      "1.21.11"
+      "1.21.11",
+      "26.1.2",
+      "26.2",
+      "26.3"
     ],
     "kind": "reviewed-legacy-mapping",
     "upstream": "https://github.com/EngineHub/WorldEdit/blob/master/worldedit-core/src/main/resources/com/sk89q/worldedit/world/registry/legacy.json",
@@ -22,7 +56,48 @@
     "sourceMaxMinecraftVersion": "1.12.2",
     "description": "WorldEdit-derived mappings preserved from MineRender, including its block-name and cauldron updates. This table describes numeric block IDs through Java 1.12.2; it is not a mapping between arbitrary modern versions.",
     "targetCorrections": {
-      "1.21.5": {
+      "1.16.5": [
+        "walls",
+        "grass",
+        "pre-1.17-blocks"
+      ],
+      "1.17.1": [
+        "walls",
+        "grass"
+      ],
+      "1.18.2": [
+        "walls",
+        "grass"
+      ],
+      "1.19.4": [
+        "walls",
+        "grass"
+      ],
+      "1.20.1": [
+        "walls",
+        "grass"
+      ],
+      "1.20.6": [
+        "walls"
+      ],
+      "1.21.5": [
+        "walls"
+      ],
+      "1.21.11": [
+        "walls"
+      ],
+      "26.1.2": [
+        "walls"
+      ],
+      "26.2": [
+        "walls"
+      ],
+      "26.3": [
+        "walls"
+      ]
+    },
+    "correctionGroups": {
+      "walls": {
         "139:0": {
           "from": "minecraft:cobblestone_wall[east=false,south=false,north=false,west=false,up=false]",
           "to": "minecraft:cobblestone_wall[east=none,south=none,north=none,west=none,up=false]",
@@ -34,16 +109,33 @@
           "reason": "Modern wall sides use none, low, or tall. A disconnected legacy side maps to none."
         }
       },
-      "1.21.11": {
-        "139:0": {
-          "from": "minecraft:cobblestone_wall[east=false,south=false,north=false,west=false,up=false]",
-          "to": "minecraft:cobblestone_wall[east=none,south=none,north=none,west=none,up=false]",
-          "reason": "Modern wall sides use none, low, or tall. A disconnected legacy side maps to none."
+      "grass": {
+        "31:1": {
+          "from": "minecraft:short_grass",
+          "to": "minecraft:grass",
+          "reason": "Before Minecraft 1.20.3, short grass uses the grass block ID."
+        }
+      },
+      "pre-1.17-blocks": {
+        "118:1": {
+          "from": "minecraft:water_cauldron[level=1]",
+          "to": "minecraft:cauldron[level=1]",
+          "reason": "Before Minecraft 1.17, filled cauldrons use cauldron with a level property."
         },
-        "139:1": {
-          "from": "minecraft:mossy_cobblestone_wall[east=false,south=false,north=false,west=false,up=false]",
-          "to": "minecraft:mossy_cobblestone_wall[east=none,south=none,north=none,west=none,up=false]",
-          "reason": "Modern wall sides use none, low, or tall. A disconnected legacy side maps to none."
+        "118:2": {
+          "from": "minecraft:water_cauldron[level=2]",
+          "to": "minecraft:cauldron[level=2]",
+          "reason": "Before Minecraft 1.17, filled cauldrons use cauldron with a level property."
+        },
+        "118:3": {
+          "from": "minecraft:water_cauldron[level=3]",
+          "to": "minecraft:cauldron[level=3]",
+          "reason": "Before Minecraft 1.17, filled cauldrons use cauldron with a level property."
+        },
+        "208:0": {
+          "from": "minecraft:dirt_path",
+          "to": "minecraft:grass_path",
+          "reason": "Before Minecraft 1.17, dirt paths use the grass_path block ID."
         }
       }
     }

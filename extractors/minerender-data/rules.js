@@ -25,7 +25,17 @@ function checkProperty(block, states, property, expected) {
   }
 }
 
-function buildBlockTints(source, blockStates) {
+function buildBlockTints(source, blockStates, aliases) {
+  source = { ...source };
+  for (const [block, alias] of Object.entries(aliases)) {
+    if (!Object.hasOwn(source, alias.from) || Object.hasOwn(source, block)) {
+      throw new Error(`block-tints: invalid alias for ${block}`);
+    }
+    for (const [property, values] of Object.entries(alias.properties)) {
+      checkProperty(block, blockStates[block] ?? {}, property, values);
+    }
+    source[block] = source[alias.from];
+  }
   const included = {};
   const excluded = [];
   for (const [block, rule] of Object.entries(source).sort(([a], [b]) => a.localeCompare(b))) {
@@ -87,9 +97,19 @@ export async function buildRules(version, blockStates) {
     readSource('block-tints.json', source['block-tints.json']),
     readSource('legacy-blocks.json', source['legacy-blocks.json'])
   ]);
-  const blockTints = buildBlockTints(tints, blockStates);
-  const corrections = source['legacy-blocks.json'].targetCorrections[version];
-  if (!corrections) throw new Error(`legacy-blocks: missing target profile for ${version}`);
+  const aliases = source['block-tints.json'].targetAliases?.[version] ?? {};
+  const blockTints = buildBlockTints(tints, blockStates, aliases);
+  const groups = source['legacy-blocks.json'].targetCorrections[version];
+  if (!groups) throw new Error(`legacy-blocks: missing target profile for ${version}`);
+  const corrections = {};
+  for (const name of groups) {
+    const group = source['legacy-blocks.json'].correctionGroups[name];
+    if (!group) throw new Error(`legacy-blocks: unknown correction group ${name}`);
+    for (const [key, correction] of Object.entries(group)) {
+      if (Object.hasOwn(corrections, key)) throw new Error(`legacy-blocks: duplicate correction for ${key}`);
+      corrections[key] = correction;
+    }
+  }
   const legacyBlocks = buildLegacyBlocks(legacy, blockStates, corrections);
   const provenance = Object.fromEntries([
     ['blockTints', 'block-tints.json'], ['legacyBlocks', 'legacy-blocks.json']
@@ -101,6 +121,7 @@ export async function buildRules(version, blockStates) {
     description: source[name].description
   }]));
   provenance.blockTints.excludedAbsentBlocks = blockTints.excluded;
+  if (Object.keys(aliases).length) provenance.blockTints.aliases = aliases;
   Object.assign(provenance.legacyBlocks, {
     upstream: source['legacy-blocks.json'].upstream,
     sourceFormat: source['legacy-blocks.json'].sourceFormat,
