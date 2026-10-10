@@ -5,9 +5,39 @@ import { minecraftSin, minecraftCos } from '../../extractors/entity-models/proce
 
 const records = (...ids) => ids.map(id => ({ id: `minecraft:${id}`, layers: { main: {} } }));
 
+test('classic fixtures follow the ground and goat-horn APIs of each reviewed release', () => {
+  for (const [version, ground, horns] of [['1.17.1', 'isOnGround', false], ['1.18.2', 'isOnGround', false],
+    ['1.19.4', 'isOnGround', true], ['1.20.1', 'onGround', true], ['1.20.6', 'onGround', true]]) {
+    const requests = classicAnimations(version, records('axolotl', 'goat'));
+    const axolotl = requests.find(request => request.models.includes('minecraft:axolotl'));
+    const getters = axolotl.clips.crawl_sample.frames[0].values[0].getters;
+    assert.equal(getters[ground], true);
+    assert.equal(Object.hasOwn(getters, ground === 'onGround' ? 'isOnGround' : 'onGround'), false);
+    const goat = requests.find(request => request.models.includes('minecraft:goat'));
+    assert.equal(goat.clips.walk_cycle.frames[0].values[0].getters.hasLeftHorn, horns ? true : undefined);
+  }
+});
+
+test('1.20.6 additions sample bogged, wolf armor, and wind-charge controllers', () => {
+  const input = records('bogged', 'wolf', 'wolf_armor', 'wind_charge');
+  input[0].layers.outer = {};
+  const requests = classicAnimations('1.20.6', input);
+  const bogged = requests.find(request => request.models.includes('minecraft:bogged'));
+  assert.equal(bogged.class, 'net.minecraft.client.model.BoggedModel');
+  assert.equal(bogged.clips.walk_cycle.frames[0].values[0].$entity, 'net.minecraft.world.entity.monster.Bogged');
+  const outer = requests.find(request => request.models.includes('minecraft:bogged') && request.layer === 'outer');
+  assert.equal(outer.class, 'net.minecraft.client.model.SkeletonModel');
+  assert.deepEqual(outer.clips.walk_cycle_outer, bogged.clips.walk_cycle);
+  const wolf = requests.find(request => request.models.includes('minecraft:wolf') && request.clips.walk_cycle);
+  assert.deepEqual(wolf.models, ['minecraft:wolf', 'minecraft:wolf_armor']);
+  const wind = requests.find(request => request.models.includes('minecraft:wind_charge'));
+  assert.equal(wind.clips.spin.length, 22.5 / 20);
+  assert.equal(wind.clips.spin.frames.at(-1).values[3], 22.5);
+});
+
 test('classic block aliases sample their original layers with the alias baked poses', () => {
   const input = records('banner', 'standing_banner', 'wall_banner', 'shulker', 'shulker_box');
-  for (const version of ['1.17.1', '1.20.1']) {
+  for (const version of ['1.17.1', '1.18.2', '1.19.4', '1.20.1', '1.20.6']) {
     const requests = classicAnimations(version, input);
     const banner = requests.find(request => request.models.includes('minecraft:standing_banner'));
     assert.deepEqual(banner.models, ['minecraft:standing_banner', 'minecraft:wall_banner']);
@@ -36,7 +66,7 @@ test('classic block aliases sample their original layers with the alias baked po
 test('classic armor copies the main model controller with matching clip timing and inputs', () => {
   const ids = ['piglin', 'piglin_brute', 'zombified_piglin', 'zombie', 'zombie_villager', 'skeleton', 'player', 'player_slim'];
   const input = ids.map(id => ({ id: `minecraft:${id}`, layers: { main: {}, inner_armor: {}, outer_armor: {} } }));
-  for (const version of ['1.17.1', '1.20.1']) {
+  for (const version of ['1.17.1', '1.18.2', '1.19.4', '1.20.1', '1.20.6']) {
     const requests = classicAnimations(version, input);
     for (const id of ids) {
       const main = requests.find(request => !request.layer && request.models.includes(`minecraft:${id}`));
@@ -81,7 +111,7 @@ test('classic tick counters preserve branch changes and final reset poses', () =
 });
 
 test('stateful axolotl sequences and integer parrot phases do not claim seamless loops', () => {
-  for (const version of ['1.17.1', '1.20.1']) {
+  for (const version of ['1.17.1', '1.18.2', '1.19.4', '1.20.1', '1.20.6']) {
     const requests = classicAnimations(version, records('axolotl', 'parrot'));
     const axolotl = requests.find(request => request.models.includes('minecraft:axolotl'));
     assert.equal(axolotl.continuous, true);
@@ -106,7 +136,7 @@ test('classic overlays receive the matching controller only when their layer exi
     ['drowned', 'outer', 'DrownedModel', 'walk_cycle'], ['stray', 'outer', 'SkeletonModel', 'walk_cycle'],
     ['tropical_fish_small', 'pattern', 'TropicalFishModelA', 'swim'], ['tropical_fish_large', 'pattern', 'TropicalFishModelB', 'swim']];
   const input = [...overlays.map(([id, layer]) => ({ id: `minecraft:${id}`, layers: { main: {}, [layer]: {} } })), ...records('skeleton')];
-  for (const version of ['1.17.1', '1.20.1']) {
+  for (const version of ['1.17.1', '1.18.2', '1.19.4', '1.20.1', '1.20.6']) {
     const requests = classicAnimations(version, input);
     for (const [id, layer, model, name] of overlays) {
       const main = requests.find(request => !request.layer && request.models.includes(`minecraft:${id}`));

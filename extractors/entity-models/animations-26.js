@@ -112,3 +112,13 @@ export function proceduralAnimations26(requests) {
     return [...groups].map(([type, models]) => ({ ...request, class: MODEL + type, models, clips }));
   });
 }
+
+export function proceduralAnimations263(requests) {
+  return proceduralAnimations26(requests).map(request => {
+    // These models inherit setupAnim but still require their concrete render state.
+    if (request.class.startsWith(MODEL + 'monster.zombie.') || request.class.endsWith('ZombifiedPiglinModel')) {
+      return { ...request, methodParameters: ['net.minecraft.client.renderer.entity.state.HumanoidRenderState'] };
+    }
+    return request;
+  });
+}

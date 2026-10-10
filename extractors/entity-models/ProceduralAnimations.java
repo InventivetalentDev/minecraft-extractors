@@ -79,7 +79,8 @@ public class ProceduralAnimations {
                         }
                         Object model = request.has("poses") ? null : model(modelClass, modelRoot, request);
                         Method method = request.has("poses") ? null : method(modelClass,
-                            request.get("method").getAsString(), types(request.getAsJsonArray("parameters")));
+                            request.get("method").getAsString(), types(request.getAsJsonArray(
+                                request.has("methodParameters") ? "methodParameters" : "parameters")));
                         Map<String, Object> animations = new TreeMap<>();
                         for (var clip : request.getAsJsonObject("clips").entrySet()) {
                             try {
@@ -193,7 +194,8 @@ public class ProceduralAnimations {
                 Field field = model.getClass().getField(entry.getKey());
                 field.set(model, convert(field.getType(), entry.getValue()));
             }
-            Object[] arguments = arguments(method.getParameterTypes(), values);
+            Object[] arguments = arguments(request.has("methodParameters")
+                ? types(request.getAsJsonArray("parameters")) : method.getParameterTypes(), values);
             if (request.has("prepare")) {
                 JsonObject prepare = request.getAsJsonObject("prepare");
                 Method preparation = method(model.getClass(), prepare.get("method").getAsString(), types(prepare.getAsJsonArray("parameters")));

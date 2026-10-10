@@ -1,21 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { nativeAnimations26, normalizeAnimationRoots26, proceduralAnimations26 } from '../../extractors/entity-models/animations-26.js';
+import { nativeAnimations26, normalizeAnimationRoots26, proceduralAnimations26, proceduralAnimations263 } from '../../extractors/entity-models/animations-26.js';
 import { extractionAdapter } from '../../extractors/entity-models/extraction-adapters.js';
 import { entityAnimations } from '../../extractors/entity-models/procedural-entities.js';
 
 test('extraction adapters select only reviewed hooks and sampler dependencies', () => {
-  const current = extractionAdapter('26.1.2');
-  assert.equal(current.normalizeModels, normalizeAnimationRoots26);
-  assert.equal(current.nativeAnimations, nativeAnimations26);
-  for (const version of ['1.21.11', '26.1.3', '26.2']) {
+  for (const version of ['26.1.2', '26.2', '26.3']) {
+    const current = extractionAdapter(version);
+    assert.equal(current.normalizeModels, normalizeAnimationRoots26);
+    assert.equal(current.nativeAnimations, nativeAnimations26);
+  }
+  for (const version of ['1.21.11', '26.1.3', '26.4']) {
     const adapter = extractionAdapter(version);
     const records = [];
     assert.equal(adapter.normalizeModels(records), records);
     assert.equal(adapter.nativeAnimations(records), records);
     assert.deepEqual(adapter.samplerLibraries, []);
   }
-  for (const version of ['1.17.1', '1.20.1']) {
+  for (const version of ['1.17.1', '1.18.2', '1.19.4', '1.20.1', '1.20.6']) {
     const libraries = extractionAdapter(version).samplerLibraries;
     assert.equal(libraries.length, 1);
     assert.equal(libraries[0].downloads.artifact.sha1, '25ea2e8b0c338a877313bd4672d3fe056ea78f0d');
@@ -101,4 +103,21 @@ test('26.1.2 cold variants use baby controllers and retain the shared profile in
     assert.equal(adapted.clips, original.clips);
   }
   assert.deepEqual(requests, before);
+});
+
+test('26.3 inherited humanoid methods retain concrete zombie and piglin state types', () => {
+  const requests = [
+    ['monster.zombie.ZombieModel', 'zombie', 'ZombieRenderState'],
+    ['monster.zombie.ZombieVillagerModel', 'zombie_villager_baby', 'ZombieVillagerRenderState'],
+    ['monster.piglin.ZombifiedPiglinModel', 'zombified_piglin', 'ZombifiedPiglinRenderState'],
+  ].map(([model, id, state]) => ({ class: `net.minecraft.client.model.${model}`, models: [`minecraft:${id}`],
+    parameters: [`net.minecraft.client.renderer.entity.state.${state}`], clips: {} }));
+  const before = structuredClone(requests);
+  const result = proceduralAnimations263(requests);
+  for (const [index, request] of result.entries()) {
+    assert.deepEqual(request.parameters, requests[index].parameters);
+    assert.deepEqual(request.methodParameters, ['net.minecraft.client.renderer.entity.state.HumanoidRenderState']);
+  }
+  assert.deepEqual(requests, before);
+  assert.ok(proceduralAnimations26(requests).every(request => !request.methodParameters));
 });
