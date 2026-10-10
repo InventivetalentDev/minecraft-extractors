@@ -1,6 +1,6 @@
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { assert, object, identifier, versionId, DATASETS, sha256, stableStringify } from './lib.js';
+import { assert, object, identifier, isImpliedItemDefault, versionId, DATASETS, sha256, stableStringify } from './lib.js';
 import { buildRules, UnsupportedRulesVersionError } from './rules.js';
 import { registryCompatibility } from './support.js';
 
@@ -144,6 +144,8 @@ export async function validateDirectory(directory, expectedVersion) {
   const list = await read('_list.json');
   assert(Array.isArray(list.directories) && list.directories.length === 0 && JSON.stringify(list.files) === JSON.stringify([...allowed].filter(file => file !== '_list.json').sort()), 'Invalid directory index');
   validateRuntime(runtime, manifest.minecraftVersion);
+  assert(Object.values(runtime.itemDefaults).every(components => !isImpliedItemDefault(components)),
+    'item-defaults.json must omit items whose only default is a stack size of 64');
   let rules;
   try { rules = await buildRules(manifest.minecraftVersion, runtime.blockStates); }
   catch (error) { if (!(error instanceof UnsupportedRulesVersionError)) throw error; }

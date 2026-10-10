@@ -3,19 +3,27 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { DATASETS, writeJson } from '../../extractors/minerender-data/lib.js';
+import { DATASETS, isImpliedItemDefault, writeJson } from '../../extractors/minerender-data/lib.js';
 import { effectColor, validateRuntime, validateFixtures, validateDirectory } from '../../extractors/minerender-data/validation.js';
 
 function fixture() {
   return {
     metadata: { minecraftVersion: '1.99', dataVersion: 1 },
-    itemDefaults: { 'minecraft:stone': { 'minecraft:max_stack_size': 64 } },
+    itemDefaults: { 'minecraft:nether_star': { 'minecraft:max_stack_size': 64, 'minecraft:enchantment_glint_override': true } },
     potionColors: { effects: { 'minecraft:red': 0xff0000, 'minecraft:blue': 0x0000ff }, potions: { 'minecraft:empty': [] } },
     blockStates: { 'minecraft:water': { level: { type: 'int', valueType: 'int', default: 0, values: [0, 1] } } },
     fluids: { 'minecraft:water': { kind: 'water', levelProperty: 'level', renderModel: false } },
     dyes: Object.fromEntries(Array.from({ length: 16 }, (_, id) => [`dye_${id}`, { id, textureDiffuseColor: 0, fireworkColor: 0, textColor: 0 }]))
   };
 }
+
+test('only a stack size of 64 with no other components is implied', () => {
+  assert.equal(isImpliedItemDefault({ 'minecraft:max_stack_size': 64 }), true);
+  for (const size of [1, 16, 32, '64']) assert.equal(isImpliedItemDefault({ 'minecraft:max_stack_size': size }), false);
+  for (const glint of [true, false]) assert.equal(isImpliedItemDefault({ 'minecraft:max_stack_size': 64, 'minecraft:enchantment_glint_override': glint }), false);
+  assert.equal(isImpliedItemDefault({}), false);
+  assert.equal(isImpliedItemDefault({ 'minecraft:enchantment_glint_override': true }), false);
+});
 
 test('runtime validation rejects wrong versions, invalid defaults, and broken references', () => {
   const data = fixture();
@@ -100,6 +108,14 @@ test('publication validation rejects tampering, version mismatches, and undeclar
   await writeJson(directory, 'manifest.json', manifest);
   await writeJson(directory, '_list.json', { directories: [], files: ['manifest.json', 'version.json', ...Object.values(datasets).map(entry => entry.file)].sort() });
   await validateDirectory(directory, '1.99');
+  await t.test('publication validation rejects implied item defaults', async () => {
+    datasets.itemDefaults = await writeJson(directory, DATASETS.itemDefaults,
+      { ...data.itemDefaults, 'minecraft:stone': { 'minecraft:max_stack_size': 64 } });
+    await writeJson(directory, 'manifest.json', manifest);
+    await assert.rejects(validateDirectory(directory), { message: 'item-defaults.json must omit items whose only default is a stack size of 64' });
+    datasets.itemDefaults = await writeJson(directory, DATASETS.itemDefaults, data.itemDefaults);
+    await writeJson(directory, 'manifest.json', manifest);
+  });
   await assert.rejects(validateDirectory(directory, '1.21.11'), /version mismatch/);
   const filename = path.join(directory, 'item-defaults.json'), original = await readFile(filename);
   await writeFile(filename, '{}');

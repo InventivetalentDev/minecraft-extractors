@@ -17,7 +17,7 @@ async function dataFixture(directory, repository, version) {
   const dyeNames = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray',
     'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black'];
   const data = {
-    itemDefaults: { 'minecraft:stick': { 'minecraft:max_stack_size': 64 } },
+    itemDefaults: { 'minecraft:ender_pearl': { 'minecraft:max_stack_size': 16 } },
     potionColors: { effects: { 'minecraft:speed': 3402751 }, potions: {
       'minecraft:swiftness': [{ id: 'minecraft:speed', amplifier: 0 }]
     } },
