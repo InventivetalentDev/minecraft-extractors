@@ -80,7 +80,7 @@ test('reviewed releases select their block names and preserve cauldron levels', 
     assert.equal(Object.hasOwn(rules.blockTints, 'minecraft:cauldron'), !splitCauldron, version);
     assert.equal(Object.hasOwn(rules.provenance.blockTints, 'aliases'), !splitCauldron, version);
     if (!splitCauldron) {
-      assert.deepEqual(rules.blockTints['minecraft:cauldron'], { source: 'constant', color: 4159204 });
+      assert.deepEqual(rules.blockTints['minecraft:cauldron'], { source: 'constant', color: 4159204, biome: 'water' });
       assert.equal(rules.provenance.blockTints.aliases['minecraft:cauldron'].from, 'minecraft:water_cauldron');
     }
   }
@@ -90,4 +90,23 @@ test('the 1.16.5 cauldron tint requires its reviewed level range', async () => {
   await assert.rejects(buildRules('1.16.5', {
     'minecraft:cauldron': { level: { values: [1, 2, 3] } }
   }), /cauldron requires level values 0, 1, 2, 3/);
+});
+
+
+test('biome tint rules preserve preview colors and omit absent blocks', async () => {
+  const states = await blockStates();
+  states['minecraft:mangrove_leaves'] = {};
+  states['minecraft:leaf_litter'] = {};
+  const { blockTints } = await buildRules('1.21.11', states);
+  for (const name of ['oak_leaves', 'jungle_leaves', 'acacia_leaves', 'dark_oak_leaves', 'vine', 'mangrove_leaves']) {
+    assert.deepEqual(blockTints[`minecraft:${name}`], { source: 'constant', color: 4764952, biome: 'foliage' });
+  }
+  assert.deepEqual(blockTints['minecraft:leaf_litter'], { source: 'constant', color: 6044722, biome: 'dry_foliage' });
+  assert.deepEqual(blockTints['minecraft:water_cauldron'], { source: 'constant', color: 4159204, biome: 'water' });
+  assert.deepEqual(blockTints['minecraft:sugar_cane'], { source: 'constant', color: 16777215, biome: 'grass' });
+  for (const name of ['spruce_leaves', 'birch_leaves', 'lily_pad', 'redstone_wire', 'melon_stem']) {
+    assert.equal(blockTints[`minecraft:${name}`].biome, undefined);
+  }
+  delete states['minecraft:leaf_litter'];
+  assert.equal((await buildRules('1.21.11', states)).blockTints['minecraft:leaf_litter'], undefined);
 });
