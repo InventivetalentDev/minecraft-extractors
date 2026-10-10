@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { extractDatasets } from '../../tools/extract.js';
 import { extract as extractRegistry } from '../../extractors/minerender-data/extract.js';
+import { SUPPORTED_VERSIONS } from '../../extractors/minerender-data/support.js';
 
 async function temporary(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'minecraft-extractors-preflight-'));
@@ -14,7 +15,7 @@ async function temporary(t) {
 
 test('combined extraction rejects invalid output and dataset combinations before preparing a runtime', async () => {
   await assert.rejects(extractDatasets('1.21.11', '/tmp/extraction-output', { fixtures: '/tmp/extraction-output/fixtures.json' }), /outside the output/);
-  await assert.rejects(extractDatasets('1.16.5', '/tmp/extraction-output'), /requires --dataset entity-models/);
+  await assert.rejects(extractDatasets('1.16.5', '/tmp/extraction-output'), /entity extraction requires --entity-dump/);
   await assert.rejects(extractDatasets('1.21.11', '/tmp/extraction-output', { dataset: 'entity-models', fixtures: '/tmp/fixtures.json' }), /requires minerender-data/);
 });
 
@@ -24,9 +25,9 @@ test('registry support is checked before runtime preparation or output creation'
   const cache = path.join(directory, 'cache');
   const fetch = t.mock.method(globalThis, 'fetch', () => { throw new Error('Unexpected network request'); });
   const runtime = new Proxy({}, { get() { throw new Error('Unexpected runtime access'); } });
-  for (const version of ['1.20.1', '26.1.2']) {
+  for (const version of ['1.16.4', '1.21.6']) {
     for (const options of [{ offline: true, cache }, { runtime }]) {
-      const expected = { message: `minerender-data does not support Minecraft ${version}. Supported versions: 1.21.5, 1.21.11. Use tools/extract.js --dataset entity-models for entity-only extraction.` };
+      const expected = { message: `minerender-data does not support Minecraft ${version}. Supported versions: ${SUPPORTED_VERSIONS.join(', ')}. Use tools/extract.js --dataset entity-models for entity-only extraction.` };
       await assert.rejects(extractDatasets(version, output, options), expected);
       await assert.rejects(extractDatasets(version, output, { ...options, dataset: 'minerender-data' }), expected);
       await assert.rejects(extractRegistry(version, output, options), expected);
@@ -39,9 +40,10 @@ test('registry support is checked before runtime preparation or output creation'
 test('supported registry versions and other entity-only versions reach runtime preparation', async t => {
   const directory = await temporary(t);
   const options = { offline: true, cache: path.join(directory, 'cache') };
-  for (const version of ['1.21.5', '1.21.11']) {
+  for (const version of SUPPORTED_VERSIONS) {
     const output = path.join(directory, version);
-    await assert.rejects(extractDatasets(version, output, options), /Offline cache miss/);
+    await assert.rejects(extractDatasets(version, output, { ...options, dataset: 'minerender-data' }), /Offline cache miss/);
+    if (version !== '1.16.5') await assert.rejects(extractDatasets(version, output, options), /Offline cache miss/);
     await assert.rejects(extractRegistry(version, output, options), /Offline cache miss/);
   }
   for (const version of ['1.20.1', '26.1.2']) {

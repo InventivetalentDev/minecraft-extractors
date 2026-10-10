@@ -2,6 +2,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { assert, object, identifier, versionId, DATASETS, sha256, stableStringify } from './lib.js';
 import { buildRules, UnsupportedRulesVersionError } from './rules.js';
+import { registryCompatibility } from './support.js';
 
 const integer = (value, minimum, maximum) => Number.isSafeInteger(value) && value >= minimum && value <= maximum;
 const color = value => integer(value, 0, 0xffffff);
@@ -48,22 +49,30 @@ export function validateRuntime(data, version) {
   for (const values of [data.itemDefaults, effects, potions, data.blockStates, data.fluids]) assert(Object.keys(values).length > 0, 'Extracted dataset is empty');
 }
 
-export function effectColor(effects, colors) {
+export function effectColor(effects, colors, legacy = false) {
   let weight = 0, red = 0, green = 0, blue = 0;
+  // PotionUtils accumulates normalized RGB channels as Java floats.
+  const add = (total, value) => legacy ? Math.fround(total + Math.fround(value / 255)) : total + value;
   for (const effect of effects) {
     if (effect.show_particles === false) continue;
     const value = colors[effect.id], contribution = effect.amplifier + 1;
     assert(color(value), `Unknown effect color: ${effect.id}`);
     weight += contribution;
-    red += (value >> 16 & 255) * contribution;
-    green += (value >> 8 & 255) * contribution;
-    blue += (value & 255) * contribution;
+    red = add(red, (value >> 16 & 255) * contribution);
+    green = add(green, (value >> 8 & 255) * contribution);
+    blue = add(blue, (value & 255) * contribution);
   }
-  return weight ? Math.floor(red / weight) << 16 | Math.floor(green / weight) << 8 | Math.floor(blue / weight) : null;
+  if (!weight) return legacy ? (effects.length ? 0 : 3694022) : null;
+  const channel = value => Math.floor(legacy ? Math.fround(Math.fround(value / weight) * 255) : value / weight);
+  return channel(red) << 16 | channel(green) << 8 | channel(blue);
 }
 
 export function validateFixtures(data, fixture) {
   assert(fixture.minecraftVersion === data.metadata.minecraftVersion, 'Native fixture version mismatch');
+  const { legacyPotionColors, durabilityBars } = registryCompatibility(data.metadata.minecraftVersion);
+  if (fixture.capabilities !== undefined || !durabilityBars) {
+    assert(fixture.capabilities?.itemBars === durabilityBars, 'Native durability bar capability does not match the Minecraft version');
+  }
   let stacks = 0;
   assert(Object.keys(fixture.items).length === Object.keys(data.itemDefaults).length, 'Incomplete native item fixtures');
   for (const [id, samples] of object(fixture.items, 'Item fixtures')) {
@@ -74,10 +83,11 @@ export function validateFixtures(data, fixture) {
     if (maximum > 0) expected.push({ count: 1, damage: Math.floor(maximum / 2) }, { count: 1, damage: maximum });
     assert(samples.length === expected.length, `Incomplete native stack samples: ${id}`);
     for (const [index, sample] of samples.entries()) {
+      if (!durabilityBars) assert(['barVisible', 'barWidth', 'barColor'].every(name => !Object.hasOwn(sample, name)), `Unexpected native durability bar sample: ${id}`);
       if (id === 'minecraft:air') continue;
       assert(sample.maxStackSize === defaults['minecraft:max_stack_size'] && sample.maxDamage === (defaults['minecraft:max_damage'] ?? 0), `Native item defaults differ: ${id}`);
       assert(sample.count === expected[index].count && sample.damage === expected[index].damage, `Native stack count or damage differs: ${id}`);
-      if (maximum > 0) {
+      if (maximum > 0 && durabilityBars) {
         const damageFraction = Math.fround(Math.fround(Math.fround(sample.damage) * 13) / Math.fround(maximum));
         const width = Math.max(0, Math.min(13, Math.round(Math.fround(13 - damageFraction))));
         assert(sample.barVisible === (sample.damage > 0) && sample.barWidth === width, `Native durability bar differs: ${id}`);
@@ -87,10 +97,12 @@ export function validateFixtures(data, fixture) {
   }
   assert(Object.keys(fixture.potions).length === Object.keys(data.potionColors.potions).length, 'Incomplete native potion fixtures');
   for (const [id, expected] of object(fixture.potions, 'Potion fixtures')) {
-    assert(effectColor(data.potionColors.potions[id], data.potionColors.effects) === expected, `Native potion color differs: ${id}`);
+    assert(effectColor(data.potionColors.potions[id], data.potionColors.effects, legacyPotionColors) === expected, `Native potion color differs: ${id}`);
   }
-  for (const entry of fixture.effectMixtures) assert(effectColor(entry.effects, data.potionColors.effects) === entry.color, 'Native mixed-effect color differs');
-  return { itemSamples: stacks, potionColors: Object.keys(fixture.potions).length, effectMixtures: fixture.effectMixtures.length };
+  for (const entry of fixture.effectMixtures) assert(effectColor(entry.effects, data.potionColors.effects, legacyPotionColors) === entry.color, 'Native mixed-effect color differs');
+  const checks = { itemSamples: stacks, potionColors: Object.keys(fixture.potions).length, effectMixtures: fixture.effectMixtures.length };
+  if (!durabilityBars) checks.unavailableChecks = { durabilityBars: 'Minecraft 1.16.5 does not expose native durability bar methods.' };
+  return checks;
 }
 
 export async function validateDirectory(directory, expectedVersion) {

@@ -4,7 +4,7 @@ Extraction tools for [minecraft-entity-models](https://github.com/Inventivetalen
 
 ## Extract
 
-Use Node.js 22.12+ and a JDK: Java 17+ for older entity versions, Java 21+ for 1.21.5/1.21.11, or Java 25+ for 26.1.2. Set `JAVA_HOME` to select a JDK. No Node dependencies need installing.
+Use Node.js 22.12+ and a JDK: Java 17+ through 1.20.1, Java 21+ for 1.20.6 and 1.21 releases, or Java 25+ for 26 releases. Set `JAVA_HOME` to select a JDK. No Node dependencies need installing.
 
 ```sh
 node --test
@@ -15,9 +15,11 @@ The output directory must not exist. The command prepares the client, mappings, 
 
 Downloads and remapped clients are hash-checked and cached in `.cache/minecraft-extractors`. Use `--cache DIR` to reuse a cache, including one from either predecessor repository. `--offline` requires the cached client, remapped JAR when applicable, dependencies, and texture checks. To check reproducibility, repeat extraction to another output directory with `--offline`, then compare the directories.
 
-Version support belongs to each extractor. Registry extraction supports 1.21.5 and 1.21.11; selecting it for another version fails before runtime preparation. Use `--dataset entity-models` for other entity versions. Entity extraction retains the reviewed 1.17.1, 1.20.1, 1.21.11, and 26.1.2 adapters, native extraction for other compatible releases, and the separate 1.16.5 conversion path. An unavailable adapter or incompatible game API must not be replaced by another version's output. Entity procedural profiles and registry preview/legacy rules remain explicitly reviewed per version.
+Version support belongs to each extractor. Registry extraction supports **1.16.5, 1.17.1, 1.18.2, 1.19.4, 1.20.1, 1.20.6, 1.21.5, 1.21.11, 26.1.2, 26.2, and 26.3**; selecting it for another version fails before runtime preparation. These releases include reviewed block-preview rules and legacy block mappings. Older item APIs are normalized into the same component-keyed item defaults as modern releases.
 
-For Minecraft 1.16.5, supply the original [entity dump](https://raw.githubusercontent.com/InventivetalentDev/MineRender/08a79ec11ab236884f78906a3b593b402e987667/packages/minerender/src/entity/entityModels.json) and [block-entity dump](https://raw.githubusercontent.com/InventivetalentDev/MineRender/08a79ec11ab236884f78906a3b593b402e987667/packages/minerender/src/entity/blockEntityModels.json) to the converter. It augments the dumps using the pinned Yarn runtime:
+Entity extraction retains the reviewed 1.17.1, 1.20.1, 1.21.11, and 26.1.2 adapters, native extraction for other compatible releases, and the separate 1.16.5 conversion path. A successful native-only run does not include unreviewed procedural animations or block-model variants. Extraction always uses the requested version's runtime; it does not substitute another version's output.
+
+For Minecraft 1.16.5 registry data, use `--dataset minerender-data`. Entity extraction requires the original [entity dump](https://raw.githubusercontent.com/InventivetalentDev/MineRender/08a79ec11ab236884f78906a3b593b402e987667/packages/minerender/src/entity/entityModels.json) and [block-entity dump](https://raw.githubusercontent.com/InventivetalentDev/MineRender/08a79ec11ab236884f78906a3b593b402e987667/packages/minerender/src/entity/blockEntityModels.json). The converter augments them using the pinned Yarn runtime:
 
 ```sh
 node tools/extract.js --version 1.16.5 --dataset entity-models \
@@ -26,6 +28,8 @@ node tools/extract.js --version 1.16.5 --dataset entity-models \
 ```
 
 `--legacy-cache DIR` selects an existing Yarn tool cache. The direct converter remains available at `extractors/entity-models/convert-legacy.js`. `--fixtures FILE` retains native registry validation samples outside the output directory, for example `--fixtures out/fixtures-1.21.11.json`.
+
+Registry validation checks item defaults and potion colors against each release's native APIs. Minecraft 1.16.5 does not expose native durability-bar methods; its manifest lists that check under `validation.unavailableChecks`. Its item stack, damage, and potion checks still run.
 
 ## Validate and publish
 
@@ -47,7 +51,7 @@ The CLI also runs under a VPS scheduler. `node tools/versions.js --repository ..
 
 ## Manual GitHub execution
 
-The **Extract Minecraft datasets** workflow uses a standard GitHub-hosted Ubuntu runner and accepts a version, dataset selection, and an optional publishing flag. It runs tests, then extracts and validates each selected dataset once. Enable `verify-reproducibility` to extract again offline and compare every output byte; this option is off by default. Publishing is also off by default, and validated output is available as a downloadable artifact for three days. The workflow supports modern extraction; use the CLI for 1.16.5 with the original dumps.
+The **Extract Minecraft datasets** workflow uses a standard GitHub-hosted Ubuntu runner and accepts a version, dataset selection, and an optional publishing flag. It runs tests, then extracts and validates each selected dataset once. Enable `verify-reproducibility` to extract again offline and compare every output byte; this option is off by default. Publishing is also off by default, and validated output is available as a downloadable artifact for three days. For 1.16.5, select `minerender-data`; entity extraction requires the CLI and original dumps.
 
 Publishing is allowed only from `main`. Configure a GitHub App installed on the two data repositories with **Contents: read and write**, then set the repository variable `DATA_APP_CLIENT_ID` and secret `DATA_APP_PRIVATE_KEY`. The workflow creates a short-lived token restricted to those repositories after successful validation. No publishing credentials are needed for extraction-only runs. Pull requests do not trigger this workflow.
 
