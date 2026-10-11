@@ -28,6 +28,7 @@ export async function extract(version, output, options = {}) {
       path.join(directory, 'Extract.java'), rawFile, fixturesFile], { cwd: scratch });
     const data = JSON.parse(await readFile(rawFile, 'utf8'));
     const fixtures = JSON.parse(await readFile(fixturesFile, 'utf8'));
+    if (!data.fluidStates) throw new Error('Runtime extraction did not produce per-state fluid data');
     validateRuntime(data, version);
     const checks = validateFixtures(data, fixtures);
     let rules, unavailable = {};

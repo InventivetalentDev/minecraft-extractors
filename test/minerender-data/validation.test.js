@@ -107,7 +107,11 @@ test('publication validation rejects tampering, version mismatches, and undeclar
   await writeJson(directory, 'version.json', version);
   await writeJson(directory, 'manifest.json', manifest);
   await writeJson(directory, '_list.json', { directories: [], files: ['manifest.json', 'version.json', ...Object.values(datasets).map(entry => entry.file)].sort() });
-  await validateDirectory(directory, '1.99');
+  await t.test('historical manifests remain valid without per-state fluid data', async () => {
+    assert.equal(Object.hasOwn(manifest.datasets, 'fluidStates'), false);
+    assert.equal(Object.hasOwn(manifest.unavailable, 'fluidStates'), false);
+    await validateDirectory(directory, '1.99');
+  });
   await t.test('publication validation rejects implied item defaults', async () => {
     datasets.itemDefaults = await writeJson(directory, DATASETS.itemDefaults,
       { ...data.itemDefaults, 'minecraft:stone': { 'minecraft:max_stack_size': 64 } });

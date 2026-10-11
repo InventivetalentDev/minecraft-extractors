@@ -1,17 +1,26 @@
+import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import java.io.InputStreamReader;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
+import java.util.Set;
 import java.util.TreeMap;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.Registry;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -20,6 +29,9 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.alchemy.Potion;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.HalfTransparentBlock;
+import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
@@ -28,6 +40,8 @@ import net.minecraft.world.level.block.state.properties.EnumProperty;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.level.material.FlowingFluid;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
 /** Extracts facts from the bootstrapped vanilla registries in the supplied client JAR. */
 public class Extract {
@@ -133,6 +147,7 @@ public class Extract {
             rule.put("renderModel", state.getRenderShape() == RenderShape.MODEL);
             fluids.put(id, rule);
         }
+        var fluidStates = new FluidStates(blockRegistry, fixtures);
 
         var dyes = new TreeMap<String, Object>();
         for (var dye : DyeColor.values()) {
@@ -149,6 +164,7 @@ public class Extract {
         counts.put("potions", potions.size());
         counts.put("blocks", blocks.size());
         counts.put("fluids", fluids.size());
+        counts.put("fluidStates", fluidStates.stateCount);
         counts.put("dyes", dyes.size());
         var metadata = new LinkedHashMap<String, Object>();
         metadata.put("minecraftVersion", minecraftVersion);
@@ -160,6 +176,7 @@ public class Extract {
         data.put("potionColors", new TreeMap<>(Map.of("effects", effects, "potions", potions)));
         data.put("blockStates", blocks);
         data.put("fluids", fluids);
+        data.put("fluidStates", fluidStates.data());
         data.put("dyes", dyes);
         write(Path.of(args[0]), data);
         if (fixtures) {
@@ -169,9 +186,194 @@ public class Extract {
             fixture.put("items", itemFixtures);
             fixture.put("potions", potionFixtures);
             fixture.put("effectMixtures", effectMixtures());
+            fixture.put("fluidStates", Map.of("stateCount", fluidStates.stateCount, "samples", fluidStates.samples));
             write(Path.of(args[1]), fixture);
         }
         System.out.println("Extracted Minecraft " + minecraftVersion + ": " + counts);
+    }
+
+    private static final class FluidStates {
+        private final List<Object> shapes = new ArrayList<>();
+        private final List<Object> profiles = new ArrayList<>();
+        private final Map<Object, Integer> shapeIndices = new LinkedHashMap<>();
+        private final Map<Object, Integer> profileIndices = new LinkedHashMap<>();
+        private final Map<String, Object> blocks = new TreeMap<>();
+        private final List<Object> samples = new ArrayList<>();
+        private final Set<Object> sampled = new HashSet<>();
+        private final Method occlusionShape = stateMethod("getOcclusionShape");
+        private final Method solidRender = stateMethod("isSolidRender");
+        private final Method solid = optionalMethod(BlockState.class, "isSolid");
+        private final Method blocksMotion = optionalMethod(BlockState.class, "blocksMotion");
+        private final Method material = optionalMethod(BlockState.class, "getMaterial");
+        private final Method nativeOcclusion;
+        private final Set<String> flowBlocking;
+        private final boolean fixtures;
+        private int stateCount;
+        private static final Set<String> SAMPLE_BLOCKS = Set.of("air", "stone", "water", "lava", "bubble_column", "kelp",
+            "seagrass", "glass", "oak_leaves", "oak_slab", "oak_stairs", "snow", "farmland", "dirt_path", "soul_sand",
+            "ice", "iron_bars", "oak_fence", "oak_fence_gate", "oak_trapdoor", "moving_piston", "oak_sign");
+        private static final Direction[] DIRECTIONS = {Direction.EAST, Direction.WEST, Direction.UP, Direction.DOWN, Direction.SOUTH, Direction.NORTH};
+        // A world-dependent result cannot be represented by one profile for a block state.
+        private static final BlockGetter STATIC_WORLD = (BlockGetter) Proxy.newProxyInstance(BlockGetter.class.getClassLoader(),
+            new Class<?>[] {BlockGetter.class}, (proxy, method, args) -> { throw new ContextRead(); });
+
+        private FluidStates(Registry<Block> registry, boolean fixtures) throws Exception {
+            this.fixtures = fixtures;
+            flowBlocking = blocksMotion == null && material == null
+                ? blockTag("minecraft:blocks_fluid_flow", registry, new HashSet<>(), true) : Set.of();
+            Class<?> renderer;
+            try { renderer = Class.forName("net.minecraft.client.renderer.block.LiquidBlockRenderer"); }
+            catch (ClassNotFoundException renamed) { renderer = Class.forName("net.minecraft.client.renderer.block.FluidRenderer"); }
+            nativeOcclusion = java.util.Arrays.stream(renderer.getDeclaredMethods())
+                .filter(method -> method.getName().equals("isFaceOccludedByState")).findFirst().orElseThrow();
+            nativeOcclusion.setAccessible(true);
+            var entries = registry.stream().sorted(Comparator.comparing(block -> registry.getKey(block).toString())).toList();
+            for (Block block : entries) {
+                String id = registry.getKey(block).toString();
+                var properties = block.getStateDefinition().getProperties().stream().sorted(Comparator.comparing(Property::getName)).toList();
+                var indices = new ArrayList<Integer>();
+                visit(id, properties, 0, block.defaultBlockState(), indices);
+                int nativeCount = block.getStateDefinition().getPossibleStates().size();
+                if (indices.size() != nativeCount) throw new IllegalStateException("Incomplete fluid states: " + id);
+                stateCount += nativeCount;
+                blocks.put(id, Map.of("properties", properties.stream().map(Property::getName).toList(), "states", indices));
+            }
+        }
+
+        private Map<String, Object> data() {
+            return Map.of("shapes", shapes, "profiles", profiles, "blocks", blocks);
+        }
+
+        private <T extends Comparable<T>> void visit(String id, List<Property<?>> properties, int index, BlockState state,
+            List<Integer> indices) throws Exception {
+            if (index < properties.size()) {
+                @SuppressWarnings("unchecked") Property<T> property = (Property<T>) properties.get(index);
+                for (T value : property.getPossibleValues()) visit(id, properties, index + 1, state.setValue(property, value), indices);
+                return;
+            }
+            var profile = new LinkedHashMap<String, Object>();
+            var fluid = state.getFluidState();
+            if (!fluid.isEmpty()) {
+                String kind;
+                if (fluid.getType() == Fluids.WATER || fluid.getType() == Fluids.FLOWING_WATER) kind = "water";
+                else if (fluid.getType() == Fluids.LAVA || fluid.getType() == Fluids.FLOWING_LAVA) kind = "lava";
+                else throw new IllegalStateException("Unsupported fluid in " + id);
+                profile.put("fluid", Map.of("kind", kind, "amount", fluid.getAmount(), "source", fluid.isSource(),
+                    "falling", fluid.hasProperty(FlowingFluid.FALLING) && fluid.getValue(FlowingFluid.FALLING), "height", fluid.getOwnHeight()));
+            }
+            Object stateMaterial = material == null ? null : material.invoke(state);
+            profile.put("renderModel", state.getRenderShape() == RenderShape.MODEL);
+            profile.put("heightSolid", solid == null ? accessor(stateMaterial, "isSolid") : solid.invoke(state));
+            profile.put("blocksFlow", blocksMotion != null ? blocksMotion.invoke(state)
+                : stateMaterial != null ? accessor(stateMaterial, "blocksMotion") : flowBlocking.contains(id));
+            profile.put("solidRender", staticValue(solidRender, state));
+            profile.put("waterOverlay", state.getBlock() instanceof HalfTransparentBlock || state.getBlock() instanceof LeavesBlock);
+            Object boxes = state.canOcclude() ? staticValue(occlusionShape, state) : List.of();
+            var complete = new LinkedHashMap<>(profile);
+            complete.put("occlusionShape", boxes == null ? null : intern(boxes, shapes, shapeIndices));
+            indices.add(intern(complete, profiles, profileIndices));
+            if (fixtures && SAMPLE_BLOCKS.contains(id.substring(id.indexOf(':') + 1)) && sampled.add(complete)) {
+                var values = new TreeMap<String, Object>();
+                for (var property : properties) values.put(property.getName(), stateValue(state, property));
+                var tests = new ArrayList<Object>();
+                if (boxes != null) {
+                    for (Direction direction : DIRECTIONS) {
+                        for (float height : new float[] {0.125F, 0.5F, 8.0F / 9.0F, 1.0F}) {
+                            Object result = nativeOcclusion.getParameterCount() == 3
+                                ? nativeOcclusion.invoke(null, direction, height, state)
+                                : nativeOcclusion.invoke(null, STATIC_WORLD, direction, height, BlockPos.ZERO, state);
+                            tests.add(Map.of("direction", direction.getName(), "height", height, "occluded", result));
+                        }
+                    }
+                }
+                var sample = new LinkedHashMap<String, Object>();
+                sample.put("block", id);
+                sample.put("properties", values);
+                sample.put("profile", profile);
+                sample.put("shape", boxes);
+                sample.put("occlusion", tests);
+                samples.add(sample);
+            }
+        }
+
+        private static <T extends Comparable<T>> Object stateValue(BlockState state, Property<T> property) {
+            return propertyValue(property, state.getValue(property));
+        }
+
+        private static int intern(Object value, List<Object> entries, Map<Object, Integer> indices) {
+            Integer existing = indices.get(value);
+            if (existing != null) return existing;
+            int index = entries.size();
+            entries.add(value);
+            indices.put(value, index);
+            return index;
+        }
+
+        private static Method stateMethod(String name) {
+            Method modern = optionalMethod(BlockState.class, name);
+            if (modern != null) return modern;
+            try { return BlockState.class.getMethod(name, BlockGetter.class, BlockPos.class); }
+            catch (NoSuchMethodException missing) { throw new IllegalStateException(missing); }
+        }
+
+        private static Object staticValue(Method method, BlockState state) throws Exception {
+            try {
+                Object value = normalized(method.getParameterCount() == 0 ? method.invoke(state) : method.invoke(state, STATIC_WORLD, BlockPos.ZERO));
+                if (method.getParameterCount() != 0) {
+                    Object shifted = normalized(method.invoke(state, STATIC_WORLD, new BlockPos(7, 31, -3)));
+                    if (!java.util.Objects.equals(value, shifted)) return null;
+                }
+                return value;
+            } catch (InvocationTargetException error) {
+                if (error.getCause() instanceof ContextRead) return null;
+                throw error;
+            }
+        }
+
+        private static Object normalized(Object value) {
+            if (!(value instanceof VoxelShape)) return value;
+            var boxes = new ArrayList<List<Double>>();
+            for (var box : ((VoxelShape) value).toAabbs()) boxes.add(List.of(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ));
+            boxes.sort((left, right) -> {
+                for (int axis = 0; axis < 6; axis++) {
+                    int compared = Double.compare(left.get(axis), right.get(axis));
+                    if (compared != 0) return compared;
+                }
+                return 0;
+            });
+            return boxes;
+        }
+
+        @SuppressWarnings("unchecked")
+        private static Set<String> blockTag(String id, Registry<Block> registry, Set<String> visiting, boolean required) throws Exception {
+            if (!id.contains(":")) id = "minecraft:" + id;
+            if (!visiting.add(id)) throw new IllegalStateException("Cyclic block tag: " + id);
+            String[] parts = id.split(":", 2);
+            String resource = "data/" + parts[0] + "/tags/block/" + parts[1] + ".json";
+            try (var input = Extract.class.getClassLoader().getResourceAsStream(resource)) {
+                if (input == null) {
+                    if (!required) return Set.of();
+                    throw new IllegalStateException("Missing block tag: " + id);
+                }
+                var data = new Gson().fromJson(new InputStreamReader(input, StandardCharsets.UTF_8), Map.class);
+                var result = new HashSet<String>();
+                var known = new HashSet<String>();
+                for (Block block : registry) known.add(registry.getKey(block).toString());
+                for (Object entry : (List<?>) data.get("values")) {
+                    String target = entry instanceof String ? (String) entry : (String) ((Map<?, ?>) entry).get("id");
+                    boolean entryRequired = entry instanceof String || !Boolean.FALSE.equals(((Map<?, ?>) entry).get("required"));
+                    if (target.startsWith("#")) result.addAll(blockTag(target.substring(1), registry, visiting, entryRequired));
+                    else {
+                        if (!target.contains(":")) target = "minecraft:" + target;
+                        if (known.contains(target)) result.add(target);
+                        else if (entryRequired) throw new IllegalStateException("Unknown block " + target + " in tag " + id);
+                    }
+                }
+                return result;
+            } finally { visiting.remove(id); }
+        }
+
+        private static final class ContextRead extends RuntimeException {}
     }
 
     private static <T extends Comparable<T>> Map<String, Object> propertyData(BlockState state, Property<T> property) {

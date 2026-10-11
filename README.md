@@ -21,6 +21,8 @@ Version support belongs to each extractor. Registry extraction supports **1.16.5
 
 `block-tints.json` retains preview colors and can include `biome` with `grass`, `foliage`, `dry_foliage`, or `water`. Consumers use that biome color when world context is available. Without it, they use the preview rule; grass preview rules also select biome grass colors.
 
+`fluid-states.json` adds per-state fluid contents, occlusion shapes, and separate height, flow, and overlay rules. Repeated shapes and profiles share indices. The existing `fluids.json` remains unchanged. See the [data format and native validation](docs/fluid-states.md), and the [research candidates for future extraction](docs/extraction-opportunities.md).
+
 Entity extraction retains the reviewed 1.17.1, 1.20.1, 1.21.11, and 26.1.2 adapters, native extraction for other compatible releases, and the separate 1.16.5 conversion path. A successful native-only run does not include unreviewed procedural animations or block-model variants. Extraction always uses the requested version's runtime; it does not substitute another version's output.
 
 For Minecraft 1.16.5 registry data, use `--dataset minerender-data`. Entity extraction requires the original [entity dump](https://raw.githubusercontent.com/InventivetalentDev/MineRender/08a79ec11ab236884f78906a3b593b402e987667/packages/minerender/src/entity/entityModels.json) and [block-entity dump](https://raw.githubusercontent.com/InventivetalentDev/MineRender/08a79ec11ab236884f78906a3b593b402e987667/packages/minerender/src/entity/blockEntityModels.json). The converter augments them using the pinned Yarn runtime:
