@@ -1,3 +1,4 @@
+import { validateBlockCulling, validateBlockCullingFixtures } from './block-culling.js';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { assert, object, identifier, isImpliedItemDefault, versionId, DATASETS, OPTIONAL_MANIFEST_DATASETS, sha256, stableStringify } from './lib.js';
@@ -58,6 +59,10 @@ export function validateRuntime(data, version) {
   if (data.legacyBiomes !== undefined) validateLegacyBiomes(data.legacyBiomes);
   if (data.fluidStates !== undefined) validateFluidStates(data.fluidStates, data.blockStates);
   if (data.blockLighting !== undefined) validateBlockLighting(data.blockLighting, data.blockStates);
+  if (data.blockCulling !== undefined) {
+    assert(data.fluidStates, 'Block culling requires fluid state data');
+    validateBlockCulling(data.blockCulling, data.blockStates);
+  }
 }
 
 export function effectColor(effects, colors, legacy = false) {
@@ -116,6 +121,7 @@ export function validateFixtures(data, fixture) {
   if (data.itemProperties !== undefined) Object.assign(checks, validateItemPropertyFixtures(data.itemProperties, fixture.itemProperties));
   if (data.legacyBiomes !== undefined) Object.assign(checks, validateLegacyBiomeFixtures(data.legacyBiomes, fixture.legacyBiomes));
   if (data.fluidStates !== undefined) Object.assign(checks, validateFluidFixtures(data.fluidStates, data.blockStates, fixture.fluidStates));
+  if (data.blockCulling !== undefined) Object.assign(checks, validateBlockCullingFixtures(data.blockCulling, data.blockStates, data.fluidStates, fixture.blockCulling));
   if (!durabilityBars) checks.unavailableChecks = { durabilityBars: 'Minecraft 1.16.5 does not expose native durability bar methods.' };
   return checks;
 }
