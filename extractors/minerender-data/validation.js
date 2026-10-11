@@ -1,8 +1,9 @@
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { assert, object, identifier, isImpliedItemDefault, versionId, DATASETS, sha256, stableStringify } from './lib.js';
+import { assert, object, identifier, isImpliedItemDefault, versionId, DATASETS, OPTIONAL_MANIFEST_DATASETS, sha256, stableStringify } from './lib.js';
 import { buildRules, UnsupportedRulesVersionError } from './rules.js';
 import { registryCompatibility } from './support.js';
+import { validateFluidStates, validateFluidFixtures } from './fluid-states.js';
 
 const integer = (value, minimum, maximum) => Number.isSafeInteger(value) && value >= minimum && value <= maximum;
 const color = value => integer(value, 0, 0xffffff);
@@ -47,6 +48,7 @@ export function validateRuntime(data, version) {
   assert(dyes.length === 16 && new Set(dyes.map(([, dye]) => dye.id)).size === 16, 'Expected 16 distinct dyes');
   for (const [name, dye] of dyes) assert(integer(dye.id, 0, 15) && [dye.textureDiffuseColor, dye.fireworkColor, dye.textColor].every(color), `Invalid dye: ${name}`);
   for (const values of [data.itemDefaults, effects, potions, data.blockStates, data.fluids]) assert(Object.keys(values).length > 0, 'Extracted dataset is empty');
+  if (data.fluidStates !== undefined) validateFluidStates(data.fluidStates, data.blockStates);
 }
 
 export function effectColor(effects, colors, legacy = false) {
@@ -101,6 +103,7 @@ export function validateFixtures(data, fixture) {
   }
   for (const entry of fixture.effectMixtures) assert(effectColor(entry.effects, data.potionColors.effects, legacyPotionColors) === entry.color, 'Native mixed-effect color differs');
   const checks = { itemSamples: stacks, potionColors: Object.keys(fixture.potions).length, effectMixtures: fixture.effectMixtures.length };
+  if (data.fluidStates !== undefined) Object.assign(checks, validateFluidFixtures(data.fluidStates, data.blockStates, fixture.fluidStates));
   if (!durabilityBars) checks.unavailableChecks = { durabilityBars: 'Minecraft 1.16.5 does not expose native durability bar methods.' };
   return checks;
 }
@@ -129,7 +132,9 @@ export async function validateDirectory(directory, expectedVersion) {
     assert(Object.hasOwn(DATASETS, name) && typeof reason === 'string' && reason.length > 0
       && !Object.hasOwn(manifest.datasets, name), `Invalid unavailable dataset: ${name}`);
   }
-  for (const name of Object.keys(DATASETS)) assert(Object.hasOwn(manifest.datasets, name) || Object.hasOwn(unavailable, name), `Unreported dataset: ${name}`);
+  for (const name of Object.keys(DATASETS).filter(name => !OPTIONAL_MANIFEST_DATASETS.includes(name))) {
+    assert(Object.hasOwn(manifest.datasets, name) || Object.hasOwn(unavailable, name), `Unreported dataset: ${name}`);
+  }
   const allowed = new Set(['manifest.json', 'version.json', '_list.json']);
   const runtime = { metadata: { minecraftVersion: manifest.minecraftVersion, dataVersion: manifest.dataVersion } };
   for (const [name, entry] of object(manifest.datasets, 'Dataset manifest')) {

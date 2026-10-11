@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util';
 import { prepareRuntime, run } from '../../lib/runtime.js';
 import { exists } from '../../lib/download.js';
 import { isMain } from '../../lib/identity.js';
-import { DATASETS, extractorIdentity, isImpliedItemDefault, versionId, writeJson } from './lib.js';
+import { DATASETS, OPTIONAL_MANIFEST_DATASETS, extractorIdentity, isImpliedItemDefault, versionId, writeJson } from './lib.js';
 import { validateRuntime, validateFixtures, validateDirectory } from './validation.js';
 import { buildRules, UnsupportedRulesVersionError } from './rules.js';
 import { assertSupportedVersion } from './support.js';
@@ -28,6 +28,9 @@ export async function extract(version, output, options = {}) {
       path.join(directory, 'Extract.java'), rawFile, fixturesFile], { cwd: scratch });
     const data = JSON.parse(await readFile(rawFile, 'utf8'));
     const fixtures = JSON.parse(await readFile(fixturesFile, 'utf8'));
+    for (const name of OPTIONAL_MANIFEST_DATASETS) {
+      if (!data[name]) throw new Error(`Runtime extraction did not produce ${name}`);
+    }
     validateRuntime(data, version);
     const checks = validateFixtures(data, fixtures);
     let rules, unavailable = {};
