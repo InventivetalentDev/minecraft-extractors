@@ -8,11 +8,12 @@ export const DATASETS = {
   blockAppearance: 'block-appearance.json', blockStates: 'block-states.json', fluids: 'fluids.json', fluidStates: 'fluid-states.json', dyes: 'dyes.json',
   blockLighting: 'block-lighting.json',
   legacyBiomes: 'legacy-biomes.json',
+  blockCulling: 'block-culling.json',
   blockTints: 'block-tints.json', legacyBlocks: 'legacy-blocks.json'
 };
 
 // Older published manifests may omit these runtime datasets.
-export const OPTIONAL_MANIFEST_DATASETS = ['fluidStates', 'blockAppearance', 'blockLighting', 'itemProperties', 'legacyBiomes'];
+export const OPTIONAL_MANIFEST_DATASETS = ['fluidStates', 'blockAppearance', 'blockLighting', 'itemProperties', 'legacyBiomes', 'blockCulling'];
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 

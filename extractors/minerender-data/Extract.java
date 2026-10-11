@@ -46,6 +46,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.HalfTransparentBlock;
+import net.minecraft.world.level.block.IronBarsBlock;
 import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.RenderShape;
@@ -170,6 +171,7 @@ public class Extract {
         var appearance = new BlockAppearance(blockRegistry, fixtures);
         var blockLighting = new BlockLighting(blockRegistry, minecraftVersion);
         var legacyBiomes = new LegacyBiomes(dataVersionNumber, fixtures);
+        var blockCulling = new BlockCulling(blockRegistry, fixtures);
 
         var dyes = new TreeMap<String, Object>();
         for (var dye : DyeColor.values()) {
@@ -188,6 +190,7 @@ public class Extract {
         counts.put("fluids", fluids.size());
         counts.put("fluidStates", fluidStates.stateCount);
         counts.put("blockLighting", blockLighting.stateCount);
+        counts.put("blockCulling", blockCulling.blocks.size());
         counts.put("dyes", dyes.size());
         var metadata = new LinkedHashMap<String, Object>();
         metadata.put("minecraftVersion", minecraftVersion);
@@ -204,6 +207,7 @@ public class Extract {
         data.put("blockAppearance", appearance.data());
         data.put("blockLighting", blockLighting.data());
         data.put("legacyBiomes", legacyBiomes.data());
+        data.put("blockCulling", blockCulling.data());
         data.put("dyes", dyes);
         write(Path.of(args[0]), data);
         if (fixtures) {
@@ -218,6 +222,7 @@ public class Extract {
             fixture.put("fluidStates", Map.of("stateCount", fluidStates.stateCount, "samples", fluidStates.samples));
             fixture.put("blockAppearance", appearance.fixtures());
             fixture.put("legacyBiomes", legacyBiomes.samples);
+            fixture.put("blockCulling", Map.of("blockCount", blocks.size(), "states", blockCulling.sampleStates, "pairs", blockCulling.samples));
             write(Path.of(args[1]), fixture);
         }
         System.out.println("Extracted Minecraft " + minecraftVersion + ": " + counts);
@@ -677,6 +682,163 @@ public class Extract {
     }
 
     private static final class ContextRead extends RuntimeException {}
+    private static final class BlockCulling {
+        private final List<Object> profiles = new ArrayList<>();
+        private final Map<Object, Integer> profileIndices = new LinkedHashMap<>();
+        private final Map<String, Integer> blocks = new TreeMap<>();
+        private final Map<String, List<String>> groups = new TreeMap<>();
+        private final List<Object> samples = new ArrayList<>();
+        private final List<Object> sampleStates = new ArrayList<>();
+        private final Map<Object, Integer> sampleStateIndices = new LinkedHashMap<>();
+        private final Registry<Block> registry;
+        private final Method cutoutLeaves;
+        private final Object barsTag;
+
+        private BlockCulling(Registry<Block> registry, boolean fixtures) throws Exception {
+            this.registry = registry;
+            Method leaves;
+            try { leaves = LeavesBlock.class.getMethod("setCutoutLeaves", boolean.class); }
+            catch (NoSuchMethodException absent) { leaves = null; }
+            cutoutLeaves = leaves;
+            Object tag;
+            try { tag = Class.forName("net.minecraft.tags.BlockTags").getField("BARS").get(null); }
+            catch (NoSuchFieldException absent) { tag = null; }
+            barsTag = tag;
+            if (barsTag != null) groups.put("bars", FluidStates.blockTag("minecraft:bars", registry, new HashSet<>(), true).stream().sorted().toList());
+            var entries = registry.stream().sorted(Comparator.comparing(block -> registry.getKey(block).toString())).toList();
+            for (Block block : entries) {
+                String id = registry.getKey(block).toString();
+                Method method = skipMethod(block.getClass());
+                String owner = method.getDeclaringClass().getName();
+                Map<String, Object> rule;
+                switch (owner) {
+                    case "net.minecraft.world.level.block.state.BlockBehaviour": continue;
+                    case "net.minecraft.world.level.block.HalfTransparentBlock":
+                    case "net.minecraft.world.level.block.PowderSnowBlock": rule = Map.of("type", "same_block"); break;
+                    case "net.minecraft.world.level.block.MangroveRootsBlock":
+                        if (!id.equals("minecraft:mangrove_roots")) throw new IllegalStateException("Unreviewed mangrove root: " + id);
+                        rule = Map.of("type", "same_block_vertical"); break;
+                    case "net.minecraft.world.level.block.IronBarsBlock":
+                        rule = barsTag == null ? Map.of("type", "connected") : Map.of("type", "connected", "group", "bars"); break;
+                    case "net.minecraft.world.level.block.LeavesBlock":
+                        if (cutoutLeaves == null) throw new IllegalStateException("Missing leaf graphics setting");
+                        rule = Map.of("type", "leaves"); break;
+                    case "net.minecraft.world.level.block.LiquidBlock":
+                        var fluid = block.defaultBlockState().getFluidState().getType();
+                        String kind;
+                        if (fluid == Fluids.WATER || fluid == Fluids.FLOWING_WATER) kind = "water";
+                        else if (fluid == Fluids.LAVA || fluid == Fluids.FLOWING_LAVA) kind = "lava";
+                        else throw new IllegalStateException("Unreviewed culling fluid: " + id);
+                        rule = Map.of("type", "fluid", "kind", kind); break;
+                    default: throw new IllegalStateException("Unreviewed skipRendering override: " + id + " (" + owner + ")");
+                }
+                blocks.put(id, intern(rule, profiles, profileIndices));
+            }
+            if (fixtures) fixtures(entries);
+        }
+
+        private Map<String, Object> data() {
+            var data = new LinkedHashMap<String, Object>();
+            data.put("profiles", profiles);
+            data.put("blocks", blocks);
+            if (!groups.isEmpty()) data.put("groups", groups);
+            return data;
+        }
+
+        private static Method skipMethod(Class<?> type) throws Exception {
+            while (type != null) {
+                try { return type.getDeclaredMethod("skipRendering", BlockState.class, BlockState.class, Direction.class); }
+                catch (NoSuchMethodException absent) { type = type.getSuperclass(); }
+            }
+            throw new IllegalStateException("Missing skipRendering method");
+        }
+
+        private void fixtures(List<Block> entries) throws Exception {
+            var known = new TreeMap<String, Block>();
+            for (Block block : entries) known.put(registry.getKey(block).toString(), block);
+            var pairs = new LinkedHashMap<String, BlockState[]>();
+            var air = known.get("minecraft:air").defaultBlockState();
+            for (Block block : entries) {
+                addPair(pairs, block.defaultBlockState(), block.defaultBlockState());
+                addPair(pairs, block.defaultBlockState(), air);
+            }
+            var neighbors = new ArrayList<BlockState>();
+            for (String name : List.of("air", "stone", "glass", "white_stained_glass", "black_stained_glass", "glass_pane",
+                "white_stained_glass_pane", "black_stained_glass_pane", "iron_bars", "copper_bars", "water", "lava",
+                "bubble_column", "kelp", "oak_slab", "oak_leaves", "birch_leaves", "mangrove_roots", "powder_snow")) {
+                Block block = known.get("minecraft:" + name);
+                if (block != null) neighbors.addAll(block.getStateDefinition().getPossibleStates());
+            }
+            var tested = new HashSet<Integer>();
+            for (Block block : entries) {
+                int profile = blocks.getOrDefault(registry.getKey(block).toString(), -1);
+                if (!tested.add(profile)) continue;
+                for (BlockState state : block.getStateDefinition().getPossibleStates()) {
+                    for (BlockState neighbor : neighbors) addPair(pairs, state, neighbor);
+                }
+            }
+            // Bars of different materials share faces only when the runtime's tag permits it.
+            var bars = entries.stream().filter(block -> block instanceof IronBarsBlock).toList();
+            for (Block block : bars) for (Block neighbor : bars) {
+                addPair(pairs, connected(block.defaultBlockState()), connected(neighbor.defaultBlockState()));
+            }
+            var savedTags = new LinkedHashMap<Object, Object>();
+            java.lang.reflect.Field tagField = null;
+            java.lang.reflect.Field leafField = null;
+            Object savedLeaves = null;
+            try {
+                if (barsTag != null) {
+                    Class<?> reference = Class.forName("net.minecraft.core.Holder$Reference");
+                    tagField = reference.getDeclaredField("tags"); tagField.setAccessible(true);
+                    Method bind = reference.getDeclaredMethod("bindTags", Collection.class); bind.setAccessible(true);
+                    Method holder = Block.class.getMethod("builtInRegistryHolder");
+                    for (Block block : entries) {
+                        Object value = holder.invoke(block);
+                        savedTags.put(value, tagField.get(value));
+                        // Bind only the vanilla tag read by skipRendering, then restore the registry.
+                        bind.invoke(value, groups.get("bars").contains(registry.getKey(block).toString()) ? Set.of(barsTag) : Set.of());
+                    }
+                }
+                if (cutoutLeaves != null) {
+                    leafField = LeavesBlock.class.getDeclaredField("cutoutLeaves"); leafField.setAccessible(true);
+                    savedLeaves = leafField.get(null);
+                }
+                for (BlockState[] pair : pairs.values()) {
+                    int mask = 0, bit = 0;
+                    for (boolean cutout : new boolean[] {false, true}) {
+                        if (cutoutLeaves != null) cutoutLeaves.invoke(null, cutout);
+                        for (Direction direction : FluidStates.DIRECTIONS) {
+                            if (pair[0].skipRendering(pair[1], direction)) mask |= 1 << bit;
+                            bit++;
+                        }
+                    }
+                    samples.add(List.of(intern(stateData(pair[0]), sampleStates, sampleStateIndices),
+                        intern(stateData(pair[1]), sampleStates, sampleStateIndices), mask));
+                }
+            } finally {
+                if (tagField != null) for (var entry : savedTags.entrySet()) tagField.set(entry.getKey(), entry.getValue());
+                if (leafField != null) leafField.set(null, savedLeaves);
+            }
+        }
+
+        private static void addPair(Map<String, BlockState[]> pairs, BlockState state, BlockState neighbor) {
+            pairs.putIfAbsent(state + "/" + neighbor, new BlockState[] {state, neighbor});
+        }
+
+        private static BlockState connected(BlockState state) {
+            for (String name : List.of("north", "east", "south", "west")) {
+                var property = state.getBlock().getStateDefinition().getProperty(name);
+                state = state.setValue((BooleanProperty) property, true);
+            }
+            return state;
+        }
+
+        private Map<String, Object> stateData(BlockState state) {
+            var properties = new TreeMap<String, Object>();
+            for (var property : state.getProperties()) properties.put(property.getName(), stateValue(state, property));
+            return Map.of("block", registry.getKey(state.getBlock()).toString(), "properties", properties);
+        }
+    }
 
     private static <T extends Comparable<T>> Map<String, Object> propertyData(BlockState state, Property<T> property) {
         String type;
