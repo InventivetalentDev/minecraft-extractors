@@ -222,7 +222,7 @@ public class Extract {
             fixture.put("fluidStates", Map.of("stateCount", fluidStates.stateCount, "samples", fluidStates.samples));
             fixture.put("blockAppearance", appearance.fixtures());
             fixture.put("legacyBiomes", legacyBiomes.samples);
-            fixture.put("blockCulling", Map.of("blockCount", blockCulling.blocks.size(), "samples", blockCulling.samples));
+            fixture.put("blockCulling", Map.of("blockCount", blocks.size(), "states", blockCulling.sampleStates, "pairs", blockCulling.samples));
             write(Path.of(args[1]), fixture);
         }
         System.out.println("Extracted Minecraft " + minecraftVersion + ": " + counts);
@@ -688,6 +688,8 @@ public class Extract {
         private final Map<String, Integer> blocks = new TreeMap<>();
         private final Map<String, List<String>> groups = new TreeMap<>();
         private final List<Object> samples = new ArrayList<>();
+        private final List<Object> sampleStates = new ArrayList<>();
+        private final Map<Object, Integer> sampleStateIndices = new LinkedHashMap<>();
         private final Registry<Block> registry;
         private final Method cutoutLeaves;
         private final Object barsTag;
@@ -702,9 +704,7 @@ public class Extract {
             try { tag = Class.forName("net.minecraft.tags.BlockTags").getField("BARS").get(null); }
             catch (NoSuchFieldException absent) { tag = null; }
             barsTag = tag;
-            groups.put("bars", barsTag == null ? List.of() : FluidStates.blockTag("minecraft:bars", registry, new HashSet<>(), true).stream().sorted().toList());
-            groups.put("leaves", registry.stream().filter(block -> block instanceof LeavesBlock)
-                .map(block -> registry.getKey(block).toString()).sorted().toList());
+            if (barsTag != null) groups.put("bars", FluidStates.blockTag("minecraft:bars", registry, new HashSet<>(), true).stream().sorted().toList());
             var entries = registry.stream().sorted(Comparator.comparing(block -> registry.getKey(block).toString())).toList();
             for (Block block : entries) {
                 String id = registry.getKey(block).toString();
@@ -712,7 +712,7 @@ public class Extract {
                 String owner = method.getDeclaringClass().getName();
                 Map<String, Object> rule;
                 switch (owner) {
-                    case "net.minecraft.world.level.block.state.BlockBehaviour": rule = Map.of("type", "none"); break;
+                    case "net.minecraft.world.level.block.state.BlockBehaviour": continue;
                     case "net.minecraft.world.level.block.HalfTransparentBlock":
                     case "net.minecraft.world.level.block.PowderSnowBlock": rule = Map.of("type", "same_block"); break;
                     case "net.minecraft.world.level.block.MangroveRootsBlock":
@@ -738,7 +738,11 @@ public class Extract {
         }
 
         private Map<String, Object> data() {
-            return Map.of("profiles", profiles, "blocks", blocks, "groups", groups);
+            var data = new LinkedHashMap<String, Object>();
+            data.put("profiles", profiles);
+            data.put("blocks", blocks);
+            if (!groups.isEmpty()) data.put("groups", groups);
+            return data;
         }
 
         private static Method skipMethod(Class<?> type) throws Exception {
@@ -767,7 +771,7 @@ public class Extract {
             }
             var tested = new HashSet<Integer>();
             for (Block block : entries) {
-                int profile = blocks.get(registry.getKey(block).toString());
+                int profile = blocks.getOrDefault(registry.getKey(block).toString(), -1);
                 if (!tested.add(profile)) continue;
                 for (BlockState state : block.getStateDefinition().getPossibleStates()) {
                     for (BlockState neighbor : neighbors) addPair(pairs, state, neighbor);
@@ -800,15 +804,16 @@ public class Extract {
                     savedLeaves = leafField.get(null);
                 }
                 for (BlockState[] pair : pairs.values()) {
-                    var faces = new ArrayList<Object>();
+                    int mask = 0, bit = 0;
                     for (boolean cutout : new boolean[] {false, true}) {
                         if (cutoutLeaves != null) cutoutLeaves.invoke(null, cutout);
                         for (Direction direction : FluidStates.DIRECTIONS) {
-                            faces.add(Map.of("direction", direction.getName(), "cutoutLeaves", cutout,
-                                "skip", pair[0].skipRendering(pair[1], direction)));
+                            if (pair[0].skipRendering(pair[1], direction)) mask |= 1 << bit;
+                            bit++;
                         }
                     }
-                    samples.add(Map.of("source", stateData(pair[0]), "neighbor", stateData(pair[1]), "faces", faces));
+                    samples.add(List.of(intern(stateData(pair[0]), sampleStates, sampleStateIndices),
+                        intern(stateData(pair[1]), sampleStates, sampleStateIndices), mask));
                 }
             } finally {
                 if (tagField != null) for (var entry : savedTags.entrySet()) tagField.set(entry.getKey(), entry.getValue());

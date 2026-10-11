@@ -24,29 +24,29 @@ function data() {
       : Array(names.reduce((count, name) => count * properties[name].values.length, 1)).fill(block === id('water') ? 1 : block === id('lava') ? 2 : 0) };
   }
   return { blockStates, fluidStates, rules: {
-    profiles: [{ type: 'none' }, { type: 'same_block' }, { type: 'same_block_vertical' },
+    profiles: [{ type: 'same_block' }, { type: 'same_block_vertical' },
       { type: 'connected', group: 'bars' }, { type: 'leaves' }, { type: 'fluid', kind: 'water' }, { type: 'fluid', kind: 'lava' }],
-    blocks: Object.fromEntries(Object.entries(blocks).map(([name, profile]) => [id(name), profile])),
-    groups: { bars: [id('copper_bars'), id('iron_bars')], leaves: [id('birch_leaves'), id('oak_leaves')] }
+    blocks: Object.fromEntries(Object.entries(blocks).filter(([, profile]) => profile !== 0).map(([name, profile]) => [id(name), profile - 1])),
+    groups: { bars: [id('copper_bars'), id('iron_bars')] }
   } };
 }
 
 const skip = (data, source, neighbor, direction = 'east', cutoutLeaves = true) =>
   skipsBlockFace(data.rules, data.blockStates, data.fluidStates, source, neighbor, direction, cutoutLeaves);
 
-test('culling rules require complete blocks, known profiles, groups, and boolean connections', () => {
+test('sparse culling rules require known blocks, profiles, groups, and boolean connections', () => {
   const original = data();
   assert.equal(validateBlockCulling(original.rules, original.blockStates), 14);
   for (const [change, message] of [
-    [data => { delete data.rules.blocks[id('air')]; }, /Incomplete block culling blocks/],
+    [data => { data.rules.blocks[id('unknown')] = 0; }, /Invalid block culling profile/],
     [data => { data.rules.blocks[id('air')] = 99; }, /Invalid block culling profile/],
     [data => { data.rules.profiles[0].type = 'solid'; }, /Unknown block culling rule/],
     [data => { data.rules.profiles[0].group = 'bars'; }, /Invalid block culling fields/],
-    [data => { data.rules.profiles[3].group = 'panes'; }, /Invalid block culling group/],
-    [data => { data.rules.profiles[5].kind = 'oil'; }, /Invalid block culling fluid/],
-    [data => { delete data.rules.groups.leaves; }, /Missing block culling groups/],
+    [data => { data.rules.profiles[2].group = 'panes'; }, /Invalid block culling group/],
+    [data => { data.rules.profiles[4].kind = 'oil'; }, /Invalid block culling fluid/],
+    [data => { delete data.rules.groups; }, /Invalid block culling group/],
     [data => { data.rules.groups.bars.push(id('unknown')); }, /Invalid block culling members/],
-    [data => { data.rules.groups.leaves.pop(); }, /Missing leaf group member/],
+    [data => { data.rules.groups.leaves = []; }, /Unknown block culling group/],
     [data => { data.blockStates[id('iron_bars')].east.values = ['false', 'true']; }, /Invalid block connection properties/]
   ]) {
     const modified = structuredClone(original);
@@ -80,7 +80,9 @@ test('pane and bar faces depend on opposing connections, block identity, and ver
     assert.equal(skip(fixture, state('iron_bars', connections()), state('iron_bars', connections()), direction), true);
     assert.equal(skip(fixture, state('iron_bars', connections(true)), state('copper_bars', connections(true)), direction), false);
   }
-  delete fixture.rules.profiles[3].group;
+  delete fixture.rules.profiles[2].group;
+  delete fixture.rules.groups;
+  validateBlockCulling(fixture.rules, fixture.blockStates);
   assert.equal(skip(fixture, state('iron_bars', connections(true)), state('copper_bars', connections(true))), false);
   assert.equal(skip(fixture, state('iron_bars', connections(true)), state('iron_bars', connections(true))), true);
 });
@@ -91,7 +93,8 @@ test('leaves retain the graphics input and older runtimes can have no leaf rule'
     assert.equal(skip(fixture, state('oak_leaves'), state('birch_leaves'), 'north', cutout), !cutout);
     assert.equal(skip(fixture, state('oak_leaves'), state('glass'), 'north', cutout), false);
   }
-  fixture.rules.blocks[id('oak_leaves')] = 0;
+  delete fixture.rules.blocks[id('oak_leaves')];
+  delete fixture.rules.blocks[id('birch_leaves')];
   assert.equal(skip(fixture, state('oak_leaves'), state('birch_leaves'), 'north', false), false);
   assert.throws(() => skipsBlockFace(fixture.rules, fixture.blockStates, fixture.fluidStates, state('oak_leaves'), state('birch_leaves'), 'north'), /Invalid native block culling context/);
 });
@@ -110,17 +113,18 @@ test('liquid comparisons use the neighbor state, including waterlogged blocks', 
 
 function nativeFixture() {
   const fixture = data();
-  const samples = Object.keys(fixture.rules.blocks).map(block => {
+  const states = [], pairs = [];
+  for (const block of Object.keys(fixture.blockStates)) {
     const properties = Object.fromEntries(Object.entries(fixture.blockStates[block]).map(([name, property]) => [name, property.values[0]]));
     const name = block.split(':')[1];
     const leaves = ['oak_leaves', 'birch_leaves'].includes(name);
     const vertical = ['mangrove_roots', 'glass_pane', 'red_stained_glass_pane', 'iron_bars', 'copper_bars'].includes(name);
     const always = ['glass', 'red_stained_glass', 'water', 'lava'].includes(name);
-    return { source: { block, properties }, neighbor: { block, properties }, faces: [false, true].flatMap(cutoutLeaves => directions.map(direction => ({
-      direction, cutoutLeaves, skip: always || (leaves && !cutoutLeaves) || (vertical && ['up', 'down'].includes(direction))
-    }))) };
-  });
-  return { ...fixture, native: { blockCount: samples.length, samples } };
+    const mask = always ? 4095 : leaves ? 63 : vertical ? (1 << 2) | (1 << 3) | (1 << 8) | (1 << 9) : 0;
+    pairs.push([states.length, states.length, mask]);
+    states.push({ block, properties });
+  }
+  return { ...fixture, native: { blockCount: states.length, states, pairs } };
 }
 
 test('native fixtures check every block, direction, leaf mode, and paired-state result', () => {
@@ -129,12 +133,17 @@ test('native fixtures check every block, direction, leaf mode, and paired-state 
   assert.deepEqual(validate(fixture), { blockCullingBlocks: 14, blockCullingPairs: 14, blockCullingFaces: 168 });
   for (const [change, message] of [
     [data => { data.native.blockCount++; }, /Incomplete native block culling fixtures/],
-    [data => { data.native.samples.pop(); }, /Incomplete native block culling coverage/],
-    [data => { data.native.samples.push(data.native.samples[0]); }, /Invalid native block culling pair/],
-    [data => { data.native.samples[0].faces.pop(); }, /Invalid native block culling pair/],
-    [data => { data.native.samples[0].faces[1] = data.native.samples[0].faces[0]; }, /Invalid native block culling face/],
-    [data => { data.native.samples[0].faces[0].skip = true; }, /Native block culling differs/],
-    [data => { data.native.samples[0].faces[0].direction = 'diagonal'; }, /Invalid native block culling context/]
+    [data => { data.native.pairs.pop(); }, /Incomplete native block culling coverage/],
+    [data => { data.native.pairs.push(data.native.pairs[0]); }, /Duplicate native block culling pair/],
+    [data => { data.native.pairs[0].pop(); }, /Invalid native block culling pair/],
+    [data => { data.native.pairs[0][0] = -1; }, /Invalid native block culling pair/],
+    [data => { data.native.pairs[0][1] = data.native.states.length; }, /Invalid native block culling pair/],
+    [data => { data.native.pairs[0][2] = 4096; }, /Invalid native block culling pair/],
+    [data => { data.native.pairs[0][2] = 0.5; }, /Invalid native block culling pair/],
+    [data => { data.native.pairs[0][2] = 1; }, /Native block culling differs/],
+    [data => { data.native.states.push(data.native.states[0]); }, /Duplicate native block culling state/],
+    [data => { data.native.states[0].block = id('unknown'); }, /Invalid native block culling state/],
+    [data => { delete data.rules.blocks[id('glass')]; }, /Native block culling differs/]
   ]) {
     const modified = structuredClone(fixture);
     change(modified);

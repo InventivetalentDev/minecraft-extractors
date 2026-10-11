@@ -3,10 +3,10 @@ import { fluidStateProfile } from './fluid-states.js';
 
 const opposite = { east: 'west', west: 'east', up: 'down', down: 'up', south: 'north', north: 'south' };
 const horizontal = ['east', 'west', 'south', 'north'];
-const types = ['none', 'same_block', 'same_block_vertical', 'connected', 'leaves', 'fluid'];
+const types = ['same_block', 'same_block_vertical', 'connected', 'leaves', 'fluid'];
 
 export function validateBlockCulling(data, blockStates) {
-  assert(data && Array.isArray(data.profiles) && data.profiles.length > 0, 'Missing block culling profiles');
+  assert(data && Array.isArray(data.profiles), 'Missing block culling profiles');
   for (const [index, profile] of data.profiles.entries()) {
     assert(profile && types.includes(profile.type), `Unknown block culling rule: ${index}`);
     const keys = ['type'];
@@ -16,47 +16,43 @@ export function validateBlockCulling(data, blockStates) {
     }
     if (profile.type === 'connected' && profile.group !== undefined) {
       keys.push('group');
-      assert(profile.group === 'bars', `Invalid block culling group: ${index}`);
+      assert(profile.group === 'bars' && Array.isArray(data.groups?.bars), `Invalid block culling group: ${index}`);
     }
     assert(stableStringify(Object.keys(profile).sort()) === stableStringify(keys.sort()), `Invalid block culling fields: ${index}`);
   }
   const blocks = object(data.blocks, 'Block culling blocks');
-  assert(blocks.length === Object.keys(blockStates).length, 'Incomplete block culling blocks');
   for (const [id, index] of blocks) {
     assert(Object.hasOwn(blockStates, id) && Number.isInteger(index) && index >= 0 && index < data.profiles.length, `Invalid block culling profile: ${id}`);
     if (data.profiles[index].type === 'connected') {
       assert(horizontal.every(name => stableStringify(blockStates[id][name]?.values?.toSorted()) === stableStringify([false, true])), `Invalid block connection properties: ${id}`);
     }
   }
-  assert(stableStringify(Object.keys(data.groups ?? {}).sort()) === stableStringify(['bars', 'leaves']), 'Missing block culling groups');
-  for (const [name, values] of object(data.groups, 'Block culling groups')) {
+  for (const [name, values] of object(data.groups ?? {}, 'Block culling groups')) {
+    assert(name === 'bars', `Unknown block culling group: ${name}`);
     assert(Array.isArray(values) && values.every(id => Object.hasOwn(blockStates, id))
       && stableStringify(values) === stableStringify([...new Set(values)].sort()), `Invalid block culling members: ${name}`);
   }
-  for (const [id, index] of blocks) {
-    if (data.profiles[index].type === 'leaves') assert(data.groups.leaves.includes(id), `Missing leaf group member: ${id}`);
-  }
-  return blocks.length;
+  return Object.keys(blockStates).length;
 }
 
 function state(data, blockStates, value) {
-  assert(value && Object.hasOwn(data.blocks, value.block), 'Invalid native block culling state');
+  assert(value && Object.hasOwn(blockStates, value.block), 'Invalid native block culling state');
   const properties = object(value.properties, 'Block culling state properties'), expected = blockStates[value.block];
   assert(properties.length === Object.keys(expected).length && properties.every(([name, entry]) => expected[name]?.values.includes(entry)), `Invalid native block culling properties: ${value.block}`);
-  return data.profiles[data.blocks[value.block]];
+  return Object.hasOwn(data.blocks, value.block) ? data.profiles[data.blocks[value.block]] : undefined;
 }
 
 // skipRendering does not include shape occlusion; false does not mean the face must be drawn.
 export function skipsBlockFace(data, blockStates, fluidStates, source, neighbor, direction, cutoutLeaves) {
   const rule = state(data, blockStates, source);
-  state(data, blockStates, neighbor);
+  const neighborRule = state(data, blockStates, neighbor);
   assert(Object.hasOwn(opposite, direction) && typeof cutoutLeaves === 'boolean', 'Invalid native block culling context');
   const same = source.block === neighbor.block;
-  switch (rule.type) {
-    case 'none': return false;
+  switch (rule?.type) {
+    case undefined: return false;
     case 'same_block': return same;
     case 'same_block_vertical': return same && !horizontal.includes(direction);
-    case 'leaves': return !cutoutLeaves && data.groups.leaves.includes(neighbor.block);
+    case 'leaves': return !cutoutLeaves && neighborRule?.type === 'leaves';
     case 'fluid': return fluidStateProfile(fluidStates, blockStates, neighbor.block, neighbor.properties).fluid?.kind === rule.kind;
     case 'connected': {
       const crossGroup = rule.group && data.groups[rule.group].includes(source.block)
@@ -70,24 +66,33 @@ export function skipsBlockFace(data, blockStates, fluidStates, source, neighbor,
 
 export function validateBlockCullingFixtures(data, blockStates, fluidStates, fixture) {
   const count = validateBlockCulling(data, blockStates);
-  assert(fluidStates && fixture?.blockCount === count && Array.isArray(fixture.samples) && fixture.samples.length > 0, 'Incomplete native block culling fixtures');
-  const blocks = new Set(), pairs = new Set();
-  let faces = 0;
-  for (const sample of fixture.samples) {
-    const pair = stableStringify([sample.source, sample.neighbor]);
-    assert(!pairs.has(pair) && Array.isArray(sample.faces) && sample.faces.length === 12, 'Invalid native block culling pair');
-    pairs.add(pair);
-    blocks.add(sample.source?.block);
-    const checked = new Set();
-    for (const face of sample.faces) {
-      const key = `${face.direction}/${face.cutoutLeaves}`;
-      assert(!checked.has(key) && typeof face.skip === 'boolean', 'Invalid native block culling face');
-      checked.add(key);
-      assert(skipsBlockFace(data, blockStates, fluidStates, sample.source, sample.neighbor, face.direction, face.cutoutLeaves) === face.skip,
-        `Native block culling differs: ${sample.source.block}/${sample.neighbor.block}/${key}`);
-      faces++;
+  assert(fluidStates && fixture?.blockCount === count && Array.isArray(fixture.states) && fixture.states.length > 0
+    && Array.isArray(fixture.pairs) && fixture.pairs.length > 0, 'Incomplete native block culling fixtures');
+  const blocks = new Set(), pairs = new Set(), states = new Set();
+  for (const entry of fixture.states) {
+    state(data, blockStates, entry);
+    const key = stableStringify(entry);
+    assert(!states.has(key), 'Duplicate native block culling state');
+    states.add(key);
+  }
+  const directions = Object.keys(opposite);
+  for (const pair of fixture.pairs) {
+    assert(Array.isArray(pair) && pair.length === 3 && pair.every(Number.isInteger)
+      && pair.slice(0, 2).every(index => index >= 0 && index < fixture.states.length)
+      && pair[2] >= 0 && pair[2] < 4096, 'Invalid native block culling pair');
+    const [sourceIndex, neighborIndex, mask] = pair, key = `${sourceIndex}/${neighborIndex}`;
+    assert(!pairs.has(key), 'Duplicate native block culling pair');
+    pairs.add(key);
+    const source = fixture.states[sourceIndex], neighbor = fixture.states[neighborIndex];
+    blocks.add(source.block);
+    // Bits 0–5 follow east, west, up, down, south, north with opaque leaves.
+    // Bits 6–11 use the same directions with cutout leaves.
+    for (let bit = 0; bit < 12; bit++) {
+      const direction = directions[bit % 6], cutoutLeaves = bit >= 6;
+      assert(skipsBlockFace(data, blockStates, fluidStates, source, neighbor, direction, cutoutLeaves) === Boolean(mask & (1 << bit)),
+        `Native block culling differs: ${source.block}/${neighbor.block}/${direction}/${cutoutLeaves}`);
     }
   }
   assert(blocks.size === count, 'Incomplete native block culling coverage');
-  return { blockCullingBlocks: count, blockCullingPairs: pairs.size, blockCullingFaces: faces };
+  return { blockCullingBlocks: count, blockCullingPairs: pairs.size, blockCullingFaces: pairs.size * 12 };
 }
