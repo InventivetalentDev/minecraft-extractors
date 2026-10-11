@@ -5,6 +5,7 @@ import { buildRules, UnsupportedRulesVersionError } from './rules.js';
 import { registryCompatibility } from './support.js';
 import { validateBlockAppearance, validateAppearanceFixtures } from './block-appearance.js';
 import { validateFluidStates, validateFluidFixtures } from './fluid-states.js';
+import { validateBlockLighting } from './block-lighting.js';
 
 const integer = (value, minimum, maximum) => Number.isSafeInteger(value) && value >= minimum && value <= maximum;
 const color = value => integer(value, 0, 0xffffff);
@@ -51,6 +52,7 @@ export function validateRuntime(data, version) {
   for (const values of [data.itemDefaults, effects, potions, data.blockStates, data.fluids]) assert(Object.keys(values).length > 0, 'Extracted dataset is empty');
   if (data.blockAppearance !== undefined) validateBlockAppearance(data.blockAppearance, data.blockStates);
   if (data.fluidStates !== undefined) validateFluidStates(data.fluidStates, data.blockStates);
+  if (data.blockLighting !== undefined) validateBlockLighting(data.blockLighting, data.blockStates);
 }
 
 export function effectColor(effects, colors, legacy = false) {

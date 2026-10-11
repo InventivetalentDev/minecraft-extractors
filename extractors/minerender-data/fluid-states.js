@@ -1,4 +1,5 @@
-import { assert, object, stableStringify } from './lib.js';
+import { assert, stableStringify } from './lib.js';
+import { validateStateProfiles } from './state-profiles.js';
 
 const integer = (value, minimum, maximum) => Number.isSafeInteger(value) && value >= minimum && value <= maximum;
 const flags = ['renderModel', 'heightSolid', 'blocksFlow', 'waterOverlay'];
@@ -22,19 +23,7 @@ export function validateFluidStates(data, blockStates) {
         && Number.isFinite(fluid.height) && Math.abs(fluid.height - fluid.amount / 9) < 1e-7, `Invalid contained fluid: ${index}`);
     }
   }
-  const blocks = object(data.blocks, 'Fluid state blocks');
-  assert(blocks.length === Object.keys(blockStates).length, 'Incomplete fluid state blocks');
-  let stateCount = 0;
-  for (const [id, entry] of blocks) {
-    const properties = blockStates[id];
-    assert(properties && Array.isArray(entry.properties)
-      && stableStringify(entry.properties) === stableStringify(Object.keys(properties).sort()), `Invalid fluid state properties: ${id}`);
-    const count = entry.properties.reduce((product, name) => product * properties[name].values.length, 1);
-    assert(Number.isSafeInteger(count) && Array.isArray(entry.states) && entry.states.length === count
-      && entry.states.every(index => integer(index, 0, data.profiles.length - 1)), `Invalid fluid state indices: ${id}`);
-    stateCount += count;
-  }
-  return stateCount;
+  return validateStateProfiles(data, blockStates, 'fluid state');
 }
 
 export function fluidStateProfile(data, blockStates, id, properties) {
