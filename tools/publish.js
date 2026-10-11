@@ -1,10 +1,11 @@
-import { cp, mkdtemp, readdir, realpath, rm } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { run } from '../lib/runtime.js';
 import { validateDataset } from '../lib/datasets.js';
 import { extractorIdentity, isMain, repoRoot, versionId } from '../lib/identity.js';
+import { refreshMineRenderData } from '../lib/cdn.js';
 
 export async function publish(dataset, version, input, repository, push = false) {
   versionId(version);
@@ -53,6 +54,13 @@ export async function publish(dataset, version, input, repository, push = false)
     await git(['add', '--all'], checkout);
     if ((await git(['diff', '--cached', '--name-only'], checkout)).trim()) await git(['commit', '-m', `Extract Minecraft ${version}`], checkout);
     if (push) await git(['push', 'origin', `refs/heads/${version}:refs/heads/${version}`]);
+    if (push && dataset === 'minerender-data' && process.env.DATASET_PURGE_TOKEN) {
+      try {
+        await refreshMineRenderData(version, await readFile(path.join(checkout, 'manifest.json')), process.env.DATASET_PURGE_TOKEN);
+      } catch (error) {
+        throw new Error(`Published ${dataset} ${version}, but CDN refresh failed: ${error.message}. The version branch remains published; retry after fixing the CDN configuration`);
+      }
+    }
     console.log(push ? `Published ${dataset} ${version}` : `Prepared ${dataset} ${version}; push from ${repository} with: git push origin ${version}`);
   } finally {
     if (attached) await git(['worktree', 'remove', '--force', checkout]);

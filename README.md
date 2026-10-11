@@ -51,6 +51,8 @@ node tools/publish.js --dataset entity-models --version 1.21.11 \
 
 Publication validates the files and prepares a data-only version branch in a temporary worktree of the destination repository. It preserves that branch's history and excludes entity texture reports. Pass `--push` to fetch and push the version branch; divergent local and remote branches require reconciliation. Publishing into the tooling repository is rejected. Publishing the two datasets is separate, so a failed push to one destination does not roll back the other.
 
+After the CDN purge endpoint is deployed, set `DATASET_PURGE_TOKEN` in the publishing environment to refresh the CDN after pushing `minerender-data`. The publisher purges the version and aliases, then checks the manifest bytes, every dataset's hash and size, and the version index. It retries stale data for up to ten minutes. A failed refresh fails the command but leaves the version branch published; rerun the same command to retry. Without the token, publication relies on the CDN's cache expiry. Entity publication and local preparation do not call the CDN.
+
 The CLI also runs under a VPS scheduler. `node tools/versions.js --repository ../minerender-data --after 2026-10-10` lists up to ten unpublished releases after an explicit cutoff. It only lists versions; it does not extract or publish. `--version VERSION` resolves one exact version and its required Java version. No schedule is configured in this repository.
 
 ## Manual GitHub execution
@@ -58,6 +60,8 @@ The CLI also runs under a VPS scheduler. `node tools/versions.js --repository ..
 The **Extract Minecraft datasets** workflow uses a standard GitHub-hosted Ubuntu runner and accepts a version, dataset selection, and an optional publishing flag. It runs tests, then extracts and validates each selected dataset once. Enable `verify-reproducibility` to extract again offline and compare every output byte; this option is off by default. Publishing is also off by default, and validated output is available as a downloadable artifact for three days. For 1.16.5, select `minerender-data`; entity extraction requires the CLI and original dumps.
 
 Publishing is allowed only from `main`. Configure a GitHub App installed on the two data repositories with **Contents: read and write**, then set the repository variable `DATA_APP_CLIENT_ID` and secret `DATA_APP_PRIVATE_KEY`. The workflow creates a short-lived token restricted to those repositories after successful validation. No publishing credentials are needed for extraction-only runs. Pull requests do not trigger this workflow.
+
+For CDN refreshes, add the optional repository secret `DATASET_PURGE_TOKEN` with the token configured on the CDN's `/minerender-data/purge` endpoint.
 
 ## Source layout
 

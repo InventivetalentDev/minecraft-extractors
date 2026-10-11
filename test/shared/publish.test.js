@@ -61,6 +61,7 @@ async function repositories(t) {
   const tooling = path.join(temporary, 'tooling'), repository = path.join(temporary, 'dataset');
   const origin = path.join(temporary, 'origin.git');
   const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
+    DATASET_PURGE_TOKEN: '',
     GIT_CONFIG_GLOBAL: path.join(temporary, 'empty-config'), GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_COUNT: '2', GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: path.join(temporary, 'hooks'),
     GIT_CONFIG_KEY_1: 'commit.gpgsign', GIT_CONFIG_VALUE_1: 'false',
@@ -100,7 +101,7 @@ async function repositories(t) {
       assert.equal((await git(['worktree', 'list', '--porcelain'], checkout)).match(/^worktree /gm).length, 1);
     }
   };
-  return { temporary, tooling, repository, git, publish, remoteHead, unchanged };
+  return { temporary, tooling, repository, git, env, publish, remoteHead, unchanged };
 }
 
 test('publishing changes only the destination version branch and preserves its history', async t => {
@@ -167,5 +168,41 @@ test('entity publication retains nested data paths and excludes the extraction r
   await publish('entity-models', version, input);
   assert.equal(await remoteHead(version), published);
   await assert.rejects(publish('entity-models', '1.99.1', input), /version.json does not match/);
+  await unchanged();
+});
+
+test('CDN refresh runs after the push and can retry a published version', async t => {
+  const { temporary, tooling, git, env, publish, remoteHead, unchanged } = await repositories(t);
+  const version = '1.99.0', input = path.join(temporary, 'data');
+  const fixture = await dataFixture(input, tooling, version);
+  const preload = path.join(temporary, 'cdn.mjs');
+  env.DATASET_PURGE_TOKEN = 'test-token';
+  env.NODE_OPTIONS = `--import=${preload}`;
+  await writeFile(preload, `globalThis.fetch = async () => new Response('', { status: 401 });\n`);
+  await assert.rejects(publish('minerender-data', version, input), /Published minerender-data 1.99.0, but CDN refresh failed: CDN purge failed: HTTP 401/);
+  const published = await remoteHead(version);
+  assert.equal((await git(['rev-parse', version])).trim(), published);
+  await unchanged();
+
+  await writeFile(preload, `
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+let calls = 0;
+globalThis.fetch = async (url, options) => {
+  calls++;
+  if (options.method === 'POST') {
+    assert.equal(url, 'https://assets.mcasset.cloud/minerender-data/purge');
+    assert.equal(options.headers.Authorization, 'Bearer test-token');
+    assert.deepEqual(JSON.parse(options.body), { version: ${JSON.stringify(version)} });
+    return Response.json({ success: true });
+  }
+  if (url === 'https://assets.mcasset.cloud/minerender-data/versions.json') return Response.json({ versions: [{ name: '${version}' }] });
+  assert.ok(url.startsWith('https://assets.mcasset.cloud/${version}/minerender-data/'));
+  return new Response(await readFile(${JSON.stringify(input + path.sep)} + url.split('/').at(-1)));
+};
+process.on('exit', () => assert.equal(calls, ${Object.keys(fixture.manifest.datasets).length + 3}));
+`);
+  await publish('minerender-data', version, input);
+  assert.equal(await remoteHead(version), published);
   await unchanged();
 });
