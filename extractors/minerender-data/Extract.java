@@ -30,6 +30,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.alchemy.Potion;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.HalfTransparentBlock;
 import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.LiquidBlock;
@@ -150,6 +151,7 @@ public class Extract {
         }
         var fluidStates = new FluidStates(blockRegistry, fixtures);
         var appearance = new BlockAppearance(blockRegistry, fixtures);
+        var blockLighting = new BlockLighting(blockRegistry, minecraftVersion, fixtures);
 
         var dyes = new TreeMap<String, Object>();
         for (var dye : DyeColor.values()) {
@@ -167,6 +169,7 @@ public class Extract {
         counts.put("blocks", blocks.size());
         counts.put("fluids", fluids.size());
         counts.put("fluidStates", fluidStates.stateCount);
+        counts.put("blockLighting", blockLighting.stateCount);
         counts.put("dyes", dyes.size());
         var metadata = new LinkedHashMap<String, Object>();
         metadata.put("minecraftVersion", minecraftVersion);
@@ -180,6 +183,7 @@ public class Extract {
         data.put("fluids", fluids);
         data.put("fluidStates", fluidStates.data());
         data.put("blockAppearance", appearance.data());
+        data.put("blockLighting", blockLighting.data());
         data.put("dyes", dyes);
         write(Path.of(args[0]), data);
         if (fixtures) {
@@ -191,6 +195,8 @@ public class Extract {
             fixture.put("effectMixtures", effectMixtures());
             fixture.put("fluidStates", Map.of("stateCount", fluidStates.stateCount, "samples", fluidStates.samples));
             fixture.put("blockAppearance", appearance.fixtures());
+            fixture.put("blockLighting", Map.of("stateCount", blockLighting.stateCount, "samples", blockLighting.samples,
+                "contextChecks", blockLighting.contextChecks));
             write(Path.of(args[1]), fixture);
         }
         System.out.println("Extracted Minecraft " + minecraftVersion + ": " + counts);
@@ -285,7 +291,7 @@ public class Extract {
         }
 
         private static Vec3 offset(Method method, BlockState state, BlockPos pos) throws Exception {
-            return (Vec3) (method.getParameterCount() == 1 ? method.invoke(state, pos) : method.invoke(state, FluidStates.STATIC_WORLD, pos));
+            return (Vec3) (method.getParameterCount() == 1 ? method.invoke(state, pos) : method.invoke(state, STATIC_WORLD, pos));
         }
 
         private static String layerName(Object layer) throws Exception {
@@ -308,12 +314,9 @@ public class Extract {
         }
     }
 
-    private static final class FluidStates {
+    private static final class FluidStates extends StateProfiles {
         private final List<Object> shapes = new ArrayList<>();
-        private final List<Object> profiles = new ArrayList<>();
         private final Map<Object, Integer> shapeIndices = new LinkedHashMap<>();
-        private final Map<Object, Integer> profileIndices = new LinkedHashMap<>();
-        private final Map<String, Object> blocks = new TreeMap<>();
         private final List<Object> samples = new ArrayList<>();
         private final Set<Object> sampled = new HashSet<>();
         private final Method occlusionShape = stateMethod("getOcclusionShape");
@@ -324,14 +327,10 @@ public class Extract {
         private final Method nativeOcclusion;
         private final Set<String> flowBlocking;
         private final boolean fixtures;
-        private int stateCount;
         private static final Set<String> SAMPLE_BLOCKS = Set.of("air", "stone", "water", "lava", "bubble_column", "kelp",
             "seagrass", "glass", "oak_leaves", "oak_slab", "oak_stairs", "snow", "farmland", "dirt_path", "soul_sand",
             "ice", "iron_bars", "oak_fence", "oak_fence_gate", "oak_trapdoor", "moving_piston", "oak_sign");
         private static final Direction[] DIRECTIONS = {Direction.EAST, Direction.WEST, Direction.UP, Direction.DOWN, Direction.SOUTH, Direction.NORTH};
-        // A world-dependent result cannot be represented by one profile for a block state.
-        private static final BlockGetter STATIC_WORLD = (BlockGetter) Proxy.newProxyInstance(BlockGetter.class.getClassLoader(),
-            new Class<?>[] {BlockGetter.class}, (proxy, method, args) -> { throw new ContextRead(); });
 
         private FluidStates(Registry<Block> registry, boolean fixtures) throws Exception {
             this.fixtures = fixtures;
@@ -343,30 +342,15 @@ public class Extract {
             nativeOcclusion = java.util.Arrays.stream(renderer.getDeclaredMethods())
                 .filter(method -> method.getName().equals("isFaceOccludedByState")).findFirst().orElseThrow();
             nativeOcclusion.setAccessible(true);
-            var entries = registry.stream().sorted(Comparator.comparing(block -> registry.getKey(block).toString())).toList();
-            for (Block block : entries) {
-                String id = registry.getKey(block).toString();
-                var properties = block.getStateDefinition().getProperties().stream().sorted(Comparator.comparing(Property::getName)).toList();
-                var indices = new ArrayList<Integer>();
-                visit(id, properties, 0, block.defaultBlockState(), indices);
-                int nativeCount = block.getStateDefinition().getPossibleStates().size();
-                if (indices.size() != nativeCount) throw new IllegalStateException("Incomplete fluid states: " + id);
-                stateCount += nativeCount;
-                blocks.put(id, Map.of("properties", properties.stream().map(Property::getName).toList(), "states", indices));
-            }
+            extract(registry);
         }
 
         private Map<String, Object> data() {
             return Map.of("shapes", shapes, "profiles", profiles, "blocks", blocks);
         }
 
-        private <T extends Comparable<T>> void visit(String id, List<Property<?>> properties, int index, BlockState state,
-            List<Integer> indices) throws Exception {
-            if (index < properties.size()) {
-                @SuppressWarnings("unchecked") Property<T> property = (Property<T>) properties.get(index);
-                for (T value : property.getPossibleValues()) visit(id, properties, index + 1, state.setValue(property, value), indices);
-                return;
-            }
+        @Override
+        Map<String, Object> profile(String id, List<Property<?>> properties, BlockState state) throws Exception {
             var profile = new LinkedHashMap<String, Object>();
             var fluid = state.getFluidState();
             if (!fluid.isEmpty()) {
@@ -387,7 +371,6 @@ public class Extract {
             Object boxes = state.canOcclude() ? staticValue(occlusionShape, state) : List.of();
             var complete = new LinkedHashMap<>(profile);
             complete.put("occlusionShape", boxes == null ? null : intern(boxes, shapes, shapeIndices));
-            indices.add(intern(complete, profiles, profileIndices));
             if (fixtures && SAMPLE_BLOCKS.contains(id.substring(id.indexOf(':') + 1)) && sampled.add(complete)) {
                 var values = new TreeMap<String, Object>();
                 for (var property : properties) values.put(property.getName(), stateValue(state, property));
@@ -410,54 +393,7 @@ public class Extract {
                 sample.put("occlusion", tests);
                 samples.add(sample);
             }
-        }
-
-        private static <T extends Comparable<T>> Object stateValue(BlockState state, Property<T> property) {
-            return propertyValue(property, state.getValue(property));
-        }
-
-        private static int intern(Object value, List<Object> entries, Map<Object, Integer> indices) {
-            Integer existing = indices.get(value);
-            if (existing != null) return existing;
-            int index = entries.size();
-            entries.add(value);
-            indices.put(value, index);
-            return index;
-        }
-
-        private static Method stateMethod(String name) {
-            Method modern = optionalMethod(BlockState.class, name);
-            if (modern != null) return modern;
-            try { return BlockState.class.getMethod(name, BlockGetter.class, BlockPos.class); }
-            catch (NoSuchMethodException missing) { throw new IllegalStateException(missing); }
-        }
-
-        private static Object staticValue(Method method, BlockState state) throws Exception {
-            try {
-                Object value = normalized(method.getParameterCount() == 0 ? method.invoke(state) : method.invoke(state, STATIC_WORLD, BlockPos.ZERO));
-                if (method.getParameterCount() != 0) {
-                    Object shifted = normalized(method.invoke(state, STATIC_WORLD, new BlockPos(7, 31, -3)));
-                    if (!java.util.Objects.equals(value, shifted)) return null;
-                }
-                return value;
-            } catch (InvocationTargetException error) {
-                if (error.getCause() instanceof ContextRead) return null;
-                throw error;
-            }
-        }
-
-        private static Object normalized(Object value) {
-            if (!(value instanceof VoxelShape)) return value;
-            var boxes = new ArrayList<List<Double>>();
-            for (var box : ((VoxelShape) value).toAabbs()) boxes.add(List.of(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ));
-            boxes.sort((left, right) -> {
-                for (int axis = 0; axis < 6; axis++) {
-                    int compared = Double.compare(left.get(axis), right.get(axis));
-                    if (compared != 0) return compared;
-                }
-                return 0;
-            });
-            return boxes;
+            return complete;
         }
 
         @SuppressWarnings("unchecked")
@@ -488,9 +424,187 @@ public class Extract {
                 return result;
             } finally { visiting.remove(id); }
         }
-
-        private static final class ContextRead extends RuntimeException {}
     }
+
+    private static final class BlockLighting extends StateProfiles {
+        private final Method shadeBrightness = stateMethod("getShadeBrightness");
+        private final Method lightBlock = stateMethod("getLightDampening", "getLightBlock");
+        private final Method skylight = stateMethod("propagatesSkylightDown");
+        private final Method emissive = stateMethod("emissiveRendering");
+        private final Method lightPermeable = optionalMethod(BlockState.class, "isLightPermeable");
+        private final Method viewBlocking;
+        private final boolean legacyAmbientOcclusion;
+        private final boolean fixtures;
+        private final List<Object> samples = new ArrayList<>();
+        private final Set<Object> sampled = new HashSet<>();
+        private int contextChecks;
+        private static final Set<String> SAMPLE_BLOCKS = Set.of("air", "stone", "glass", "tinted_glass", "oak_leaves",
+            "water", "lava", "oak_slab", "oak_stairs", "snow", "farmland", "soul_sand", "ice", "packed_ice",
+            "furnace", "redstone_lamp", "redstone_ore", "redstone_torch", "sea_pickle", "candle", "campfire",
+            "glowstone", "light", "sculk", "sculk_sensor", "sculk_shrieker", "magma_block", "moving_piston", "powder_snow");
+        private static final BlockPos[] SAMPLE_POSITIONS = {new BlockPos(-97, 173, 61), new BlockPos(2048, -31, -2048)};
+
+        private BlockLighting(Registry<Block> registry, String version, boolean fixtures) throws Exception {
+            this.fixtures = fixtures;
+            legacyAmbientOcclusion = version.equals("1.16.5");
+            viewBlocking = lightPermeable == null && !legacyAmbientOcclusion ? stateMethod("isViewBlocking") : null;
+            extract(registry);
+        }
+
+        private Map<String, Object> data() {
+            return Map.of("profiles", profiles, "blocks", blocks);
+        }
+
+        @Override
+        Map<String, Object> profile(String id, List<Property<?>> properties, BlockState state) throws Exception {
+            var result = new LinkedHashMap<String, Object>();
+            result.put("shadeBrightness", staticValue(shadeBrightness, state));
+            result.put("lightEmission", state.getLightEmission());
+            result.put("lightBlock", staticValue(lightBlock, state));
+            result.put("propagatesSkylightDown", staticValue(skylight, state));
+            result.put("useShapeForLightOcclusion", state.useShapeForLightOcclusion());
+            result.put("emissiveRendering", staticValue(emissive, state));
+            result.put("lightPermeable", staticValue((world, pos) -> lightPermeable(state, world, pos)));
+            if (fixtures) {
+                boolean sample = SAMPLE_BLOCKS.contains(id.substring(id.indexOf(':') + 1)) && sampled.add(List.of(id, result));
+                var checks = new ArrayList<Object>();
+                for (BlockPos pos : SAMPLE_POSITIONS) {
+                    var values = nativeValues(state, EmptyBlockGetter.INSTANCE, pos);
+                    for (var field : result.entrySet()) {
+                        if (field.getValue() != null && !field.getValue().equals(values.get(field.getKey()))) {
+                            throw new IllegalStateException("Context-dependent lighting in " + id + ": " + field.getKey());
+                        }
+                    }
+                    contextChecks++;
+                    if (sample) checks.add(Map.of("position", List.of(pos.getX(), pos.getY(), pos.getZ()), "values", values));
+                }
+                if (sample) {
+                    var values = new TreeMap<String, Object>();
+                    for (var property : properties) values.put(property.getName(), stateValue(state, property));
+                    samples.add(Map.of("block", id, "properties", values, "profile", result, "checks", checks));
+                }
+            }
+            return result;
+        }
+
+        private Map<String, Object> nativeValues(BlockState state, BlockGetter world, BlockPos pos) throws Exception {
+            return Map.of("shadeBrightness", stateValue(shadeBrightness, state, world, pos),
+                "lightEmission", state.getLightEmission(), "lightBlock", stateValue(lightBlock, state, world, pos),
+                "propagatesSkylightDown", stateValue(skylight, state, world, pos),
+                "useShapeForLightOcclusion", state.useShapeForLightOcclusion(),
+                "emissiveRendering", stateValue(emissive, state, world, pos),
+                "lightPermeable", lightPermeable(state, world, pos));
+        }
+
+        private boolean lightPermeable(BlockState state, BlockGetter world, BlockPos pos) throws Exception {
+            if (lightPermeable != null) return (Boolean) lightPermeable.invoke(state);
+            if (!legacyAmbientOcclusion && !(Boolean) stateValue(viewBlocking, state, world, pos)) return true;
+            return (Integer) stateValue(lightBlock, state, world, pos) == 0;
+        }
+    }
+
+    private abstract static class StateProfiles {
+        final List<Object> profiles = new ArrayList<>();
+        final Map<Object, Integer> profileIndices = new LinkedHashMap<>();
+        final Map<String, Object> blocks = new TreeMap<>();
+        int stateCount;
+
+        final void extract(Registry<Block> registry) throws Exception {
+            var entries = registry.stream().sorted(Comparator.comparing(block -> registry.getKey(block).toString())).toList();
+            for (Block block : entries) {
+                String id = registry.getKey(block).toString();
+                var properties = block.getStateDefinition().getProperties().stream().sorted(Comparator.comparing(Property::getName)).toList();
+                var indices = new ArrayList<Integer>();
+                visit(id, properties, 0, block.defaultBlockState(), indices);
+                int nativeCount = block.getStateDefinition().getPossibleStates().size();
+                if (indices.size() != nativeCount) throw new IllegalStateException("Incomplete block states: " + id);
+                stateCount += nativeCount;
+                blocks.put(id, Map.of("properties", properties.stream().map(Property::getName).toList(), "states", indices));
+            }
+        }
+
+        private <T extends Comparable<T>> void visit(String id, List<Property<?>> properties, int index, BlockState state,
+            List<Integer> indices) throws Exception {
+            if (index < properties.size()) {
+                @SuppressWarnings("unchecked") Property<T> property = (Property<T>) properties.get(index);
+                for (T value : property.getPossibleValues()) visit(id, properties, index + 1, state.setValue(property, value), indices);
+                return;
+            }
+            indices.add(intern(profile(id, properties, state), profiles, profileIndices));
+        }
+
+        abstract Map<String, Object> profile(String id, List<Property<?>> properties, BlockState state) throws Exception;
+    }
+
+    // A world-dependent result cannot be represented by one profile for a block state.
+    private static final BlockGetter STATIC_WORLD = (BlockGetter) Proxy.newProxyInstance(BlockGetter.class.getClassLoader(),
+        new Class<?>[] {BlockGetter.class}, (proxy, method, args) -> {
+            // Vanilla's maximum light level is constant; block and entity reads need a real world.
+            if (method.getName().equals("getMaxLightLevel")) return method.invoke(EmptyBlockGetter.INSTANCE);
+            throw new ContextRead();
+        });
+
+    private static <T extends Comparable<T>> Object stateValue(BlockState state, Property<T> property) {
+        return propertyValue(property, state.getValue(property));
+    }
+
+    private static int intern(Object value, List<Object> entries, Map<Object, Integer> indices) {
+        Integer existing = indices.get(value);
+        if (existing != null) return existing;
+        int index = entries.size();
+        entries.add(value);
+        indices.put(value, index);
+        return index;
+    }
+
+    private static Method stateMethod(String... names) {
+        for (String name : names) {
+            Method modern = optionalMethod(BlockState.class, name);
+            if (modern != null) return modern;
+            try { return BlockState.class.getMethod(name, BlockGetter.class, BlockPos.class); }
+            catch (NoSuchMethodException missing) {}
+        }
+        throw new IllegalStateException("Missing block state method: " + String.join(", ", names));
+    }
+
+    private static Object stateValue(Method method, BlockState state, BlockGetter world, BlockPos pos) throws Exception {
+        return method.getParameterCount() == 0 ? method.invoke(state) : method.invoke(state, world, pos);
+    }
+
+    private static Object staticValue(Method method, BlockState state) throws Exception {
+        return staticValue((world, pos) -> stateValue(method, state, world, pos));
+    }
+
+    private static Object staticValue(StateCall call) throws Exception {
+        try {
+            Object value = normalized(call.get(STATIC_WORLD, BlockPos.ZERO));
+            Object shifted = normalized(call.get(STATIC_WORLD, new BlockPos(7, 31, -3)));
+            return java.util.Objects.equals(value, shifted) ? value : null;
+        } catch (InvocationTargetException error) {
+            if (error.getCause() instanceof ContextRead) return null;
+            throw error;
+        }
+    }
+
+    private interface StateCall {
+        Object get(BlockGetter world, BlockPos pos) throws Exception;
+    }
+
+    private static Object normalized(Object value) {
+        if (!(value instanceof VoxelShape)) return value;
+        var boxes = new ArrayList<List<Double>>();
+        for (var box : ((VoxelShape) value).toAabbs()) boxes.add(List.of(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ));
+        boxes.sort((left, right) -> {
+            for (int axis = 0; axis < 6; axis++) {
+                int compared = Double.compare(left.get(axis), right.get(axis));
+                if (compared != 0) return compared;
+            }
+            return 0;
+        });
+        return boxes;
+    }
+
+    private static final class ContextRead extends RuntimeException {}
 
     private static <T extends Comparable<T>> Map<String, Object> propertyData(BlockState state, Property<T> property) {
         String type;
