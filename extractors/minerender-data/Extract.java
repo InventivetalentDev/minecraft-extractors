@@ -1,8 +1,13 @@
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.mojang.serialization.Codec;
+import com.mojang.serialization.DynamicOps;
+import com.mojang.serialization.JsonOps;
 import java.io.InputStreamReader;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -17,6 +22,7 @@ import java.util.Map;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.BiConsumer;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.Registry;
 import net.minecraft.core.BlockPos;
@@ -24,6 +30,8 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -53,6 +61,7 @@ public class Extract {
     private static Class<?> componentTypes;
     private static Method nativePotionColor;
     private static boolean itemBars;
+    private static Object registryLookup;
 
     public static void main(String[] args) throws Exception {
         if (args.length < 1 || args.length > 2) {
@@ -82,11 +91,13 @@ public class Extract {
         Registry<Potion> potionRegistry = registry("POTION");
         Registry<Block> blockRegistry = registry("BLOCK");
 
+        var itemProperties = new ItemProperties();
         var items = new TreeMap<String, Object>();
         var itemFixtures = new TreeMap<String, Object>();
         for (Item item : itemRegistry) {
             String id = itemRegistry.getKey(item).toString();
             items.put(id, itemDefaults(item));
+            itemProperties.add(id, item);
             if (fixtures) {
                 var samples = new ArrayList<Object>();
                 ItemStack clean = item.getDefaultInstance();
@@ -178,6 +189,7 @@ public class Extract {
         var data = new LinkedHashMap<String, Object>();
         data.put("metadata", metadata);
         data.put("itemDefaults", items);
+        data.put("itemProperties", itemProperties.data());
         data.put("potionColors", new TreeMap<>(Map.of("effects", effects, "potions", potions)));
         data.put("blockStates", blocks);
         data.put("fluids", fluids);
@@ -191,6 +203,8 @@ public class Extract {
             fixture.put("minecraftVersion", minecraftVersion);
             fixture.put("capabilities", Map.of("itemBars", itemBars));
             fixture.put("items", itemFixtures);
+            fixture.put("itemProperties", Map.of("items", itemProperties.items.size(),
+                "componentRoundTrips", itemProperties.componentRoundTrips, "persistentComponents", itemProperties.persistentComponents));
             fixture.put("potions", potionFixtures);
             fixture.put("effectMixtures", effectMixtures());
             fixture.put("fluidStates", Map.of("stateCount", fluidStates.stateCount, "samples", fluidStates.samples));
@@ -669,6 +683,116 @@ public class Extract {
         return entry;
     }
 
+    private static final class ItemProperties {
+        final Map<String, Object> items = new TreeMap<>();
+        final Registry<Object> attributes = registry("ATTRIBUTE");
+        final Codec<Object> componentCodec;
+        final Codec<Object> textCodec;
+        final DynamicOps<JsonElement> ops;
+        final Method eachModifier;
+        final Method legacySlot;
+        int componentRoundTrips;
+        int persistentComponents;
+
+        @SuppressWarnings("unchecked")
+        ItemProperties() throws Exception {
+            if (itemComponents != null) {
+                if (registryLookup == null) {
+                    Class<?> vanilla = Class.forName("net.minecraft.data.registries.VanillaRegistries");
+                    Method lookup = optionalMethod(vanilla, "createWorldLookup");
+                    if (lookup == null) lookup = vanilla.getMethod("createLookup");
+                    registryLookup = lookup.invoke(null);
+                }
+                ops = (DynamicOps<JsonElement>) Class.forName("net.minecraft.core.HolderLookup$Provider")
+                    .getMethod("createSerializationContext", DynamicOps.class).invoke(registryLookup, JsonOps.INSTANCE);
+                componentCodec = (Codec<Object>) Class.forName("net.minecraft.core.component.DataComponentMap").getField("CODEC").get(null);
+                textCodec = (Codec<Object>) Class.forName("net.minecraft.network.chat.ComponentSerialization").getField("CODEC").get(null);
+                eachModifier = ItemStack.class.getMethod("forEachModifier", EquipmentSlot.class, BiConsumer.class);
+            } else {
+                componentCodec = null;
+                textCodec = null;
+                eachModifier = null;
+                ops = JsonOps.INSTANCE;
+            }
+            Method slot = Mob.class.getMethod("getEquipmentSlotForItem", ItemStack.class);
+            legacySlot = Modifier.isStatic(slot.getModifiers()) ? slot : null;
+        }
+
+        void add(String id, Item item) throws Exception {
+            var entry = new LinkedHashMap<String, Object>();
+            ItemStack stack = item.getDefaultInstance();
+            Object name = stack.getHoverName();
+            JsonElement encodedName = textCodec != null ? encode(textCodec, name) : (JsonElement)
+                Class.forName("net.minecraft.network.chat.Component$Serializer")
+                    .getMethod("toJsonTree", Class.forName("net.minecraft.network.chat.Component")).invoke(null, name);
+            entry.put("name", encodedName);
+            entry.put("rarity", stack.getRarity().name().toLowerCase(java.util.Locale.ROOT));
+            EquipmentSlot slot = EquipmentSlot.MAINHAND;
+            if (legacySlot != null) slot = (EquipmentSlot) legacySlot.invoke(null, stack);
+            else {
+                Object type = componentTypes.getField("EQUIPPABLE").get(null);
+                Object value = componentGet.invoke(itemComponents.invoke(item), type);
+                if (value != null) slot = (EquipmentSlot) accessor(value, "slot");
+            }
+            entry.put("equipmentSlot", slot.getName());
+            var modifiers = new ArrayList<Map<String, Object>>();
+            for (EquipmentSlot current : EquipmentSlot.values()) {
+                if (eachModifier != null) {
+                    BiConsumer<Object, Object> consumer = (attribute, modifier) -> {
+                        try { modifiers.add(modifier(accessor(attribute, "value"), modifier, current)); }
+                        catch (Exception failure) { throw new IllegalStateException(failure); }
+                    };
+                    eachModifier.invoke(stack, current, consumer);
+                } else {
+                    var values = (com.google.common.collect.Multimap<?, ?>) ItemStack.class
+                        .getMethod("getAttributeModifiers", EquipmentSlot.class).invoke(stack, current);
+                    for (var value : values.entries()) modifiers.add(modifier(value.getKey(), value.getValue(), current));
+                }
+            }
+            modifiers.sort(Comparator.comparing(value -> value.get("slot") + ":" + value.get("attribute") + ":" + value.get("id")));
+            entry.put("attributeModifiers", modifiers);
+            if (componentCodec != null) {
+                Object components = itemComponents.invoke(item);
+                JsonElement encoded = encode(componentCodec, components);
+                Object decoded = componentCodec.parse(ops, encoded).result().orElseThrow(() -> new IllegalStateException("Cannot decode components: " + id));
+                if (!encoded.equals(encode(componentCodec, decoded))) throw new IllegalStateException("Component codec round trip differs: " + id);
+                var componentRegistry = registry("DATA_COMPONENT_TYPE");
+                for (Object type : (Set<?>) Class.forName("net.minecraft.core.component.DataComponentMap").getMethod("keySet").invoke(components)) {
+                    if (componentRegistry.getKey(type) == null) throw new IllegalStateException("Unregistered component: " + id);
+                    if (!(Boolean) Class.forName("net.minecraft.core.component.DataComponentType").getMethod("isTransient").invoke(type)) {
+                        if (componentGet.invoke(decoded, type) == null)
+                            throw new IllegalStateException("Decoded default component is missing: " + id + "/" + componentRegistry.getKey(type));
+                        persistentComponents++;
+                    }
+                }
+                componentRoundTrips++;
+                entry.put("components", encoded);
+            }
+            items.put(id, entry);
+        }
+
+        private Map<String, Object> modifier(Object attribute, Object modifier, EquipmentSlot slot) throws Exception {
+            Object operation = accessor(modifier, "operation", "getOperation");
+            String name = switch (((Enum<?>) operation).name()) {
+                case "ADDITION", "ADD_VALUE" -> "add_value";
+                case "MULTIPLY_BASE", "ADD_MULTIPLIED_BASE" -> "add_multiplied_base";
+                case "MULTIPLY_TOTAL", "ADD_MULTIPLIED_TOTAL" -> "add_multiplied_total";
+                default -> throw new IllegalStateException("Unknown attribute operation: " + operation);
+            };
+            return new TreeMap<>(Map.of("attribute", attributes.getKey(attribute).toString(), "slot", slot.getName(),
+                "id", accessor(modifier, "id", "getId").toString(), "amount", accessor(modifier, "amount", "getAmount"), "operation", name));
+        }
+
+        private JsonElement encode(Codec<Object> codec, Object value) {
+            var result = codec.encodeStart(ops, value);
+            return result.result().orElseThrow(() -> new IllegalStateException("Cannot encode item property: " + result.error()));
+        }
+
+        Map<String, Object> data() {
+            return Map.of("schemaVersion", 1, "componentFormat", componentCodec == null ? "legacy" : "native", "items", items);
+        }
+    }
+
     private static int dyeColor(DyeColor dye) throws Exception {
         Object color = accessor(dye, "getTextureDiffuseColor", "getTextureDiffuseColors");
         if (color instanceof Integer) return (Integer) color & 0xffffff;
@@ -695,8 +819,9 @@ public class Extract {
         Class<?> vanilla = Class.forName("net.minecraft.data.registries.VanillaRegistries");
         Method lookup = optionalMethod(vanilla, "createWorldLookup");
         if (lookup == null) lookup = vanilla.getMethod("createLookup");
+        registryLookup = lookup.invoke(null);
         var pending = (List<?>) builder.getClass().getMethod("build", Class.forName("net.minecraft.core.HolderLookup$Provider"))
-            .invoke(builder, lookup.invoke(null));
+            .invoke(builder, registryLookup);
         Method apply = Class.forName("net.minecraft.core.component.DataComponentInitializers$PendingComponents").getMethod("apply");
         for (Object components : pending) apply.invoke(components);
     }

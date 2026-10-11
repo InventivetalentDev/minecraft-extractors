@@ -7,6 +7,8 @@ import { validateBlockAppearance, validateAppearanceFixtures } from './block-app
 import { validateFluidStates, validateFluidFixtures } from './fluid-states.js';
 import { validateBlockLighting } from './block-lighting.js';
 
+import { validateItemProperties, validateItemPropertyFixtures } from './item-properties.js';
+
 const integer = (value, minimum, maximum) => Number.isSafeInteger(value) && value >= minimum && value <= maximum;
 const color = value => integer(value, 0, 0xffffff);
 
@@ -51,6 +53,7 @@ export function validateRuntime(data, version) {
   for (const [name, dye] of dyes) assert(integer(dye.id, 0, 15) && [dye.textureDiffuseColor, dye.fireworkColor, dye.textColor].every(color), `Invalid dye: ${name}`);
   for (const values of [data.itemDefaults, effects, potions, data.blockStates, data.fluids]) assert(Object.keys(values).length > 0, 'Extracted dataset is empty');
   if (data.blockAppearance !== undefined) validateBlockAppearance(data.blockAppearance, data.blockStates);
+  if (data.itemProperties !== undefined) validateItemProperties(data.itemProperties, data.itemDefaults);
   if (data.fluidStates !== undefined) validateFluidStates(data.fluidStates, data.blockStates);
   if (data.blockLighting !== undefined) validateBlockLighting(data.blockLighting, data.blockStates);
 }
@@ -108,6 +111,7 @@ export function validateFixtures(data, fixture) {
   for (const entry of fixture.effectMixtures) assert(effectColor(entry.effects, data.potionColors.effects, legacyPotionColors) === entry.color, 'Native mixed-effect color differs');
   const checks = { itemSamples: stacks, potionColors: Object.keys(fixture.potions).length, effectMixtures: fixture.effectMixtures.length };
   if (data.blockAppearance !== undefined) Object.assign(checks, validateAppearanceFixtures(data.blockAppearance, data.blockStates, fixture.blockAppearance));
+  if (data.itemProperties !== undefined) Object.assign(checks, validateItemPropertyFixtures(data.itemProperties, fixture.itemProperties));
   if (data.fluidStates !== undefined) Object.assign(checks, validateFluidFixtures(data.fluidStates, data.blockStates, fixture.fluidStates));
   if (!durabilityBars) checks.unavailableChecks = { durabilityBars: 'Minecraft 1.16.5 does not expose native durability bar methods.' };
   return checks;

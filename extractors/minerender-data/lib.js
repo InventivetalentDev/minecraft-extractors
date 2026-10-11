@@ -4,14 +4,14 @@ import path from 'node:path';
 export { extractorIdentity, versionId } from '../../lib/identity.js';
 
 export const DATASETS = {
-  itemDefaults: 'item-defaults.json', potionColors: 'potion-colors.json',
+  itemDefaults: 'item-defaults.json', itemProperties: 'item-properties.json', potionColors: 'potion-colors.json',
   blockAppearance: 'block-appearance.json', blockStates: 'block-states.json', fluids: 'fluids.json', fluidStates: 'fluid-states.json', dyes: 'dyes.json',
   blockLighting: 'block-lighting.json',
   blockTints: 'block-tints.json', legacyBlocks: 'legacy-blocks.json'
 };
 
 // Older published manifests may omit these runtime datasets.
-export const OPTIONAL_MANIFEST_DATASETS = ['fluidStates', 'blockAppearance', 'blockLighting'];
+export const OPTIONAL_MANIFEST_DATASETS = ['fluidStates', 'blockAppearance', 'blockLighting', 'itemProperties'];
 
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
