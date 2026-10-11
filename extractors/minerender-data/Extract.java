@@ -42,6 +42,7 @@ import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.material.FlowingFluid;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.phys.Vec3;
 
 /** Extracts facts from the bootstrapped vanilla registries in the supplied client JAR. */
 public class Extract {
@@ -148,6 +149,7 @@ public class Extract {
             fluids.put(id, rule);
         }
         var fluidStates = new FluidStates(blockRegistry, fixtures);
+        var appearance = new BlockAppearance(blockRegistry, fixtures);
 
         var dyes = new TreeMap<String, Object>();
         for (var dye : DyeColor.values()) {
@@ -177,6 +179,7 @@ public class Extract {
         data.put("blockStates", blocks);
         data.put("fluids", fluids);
         data.put("fluidStates", fluidStates.data());
+        data.put("blockAppearance", appearance.data());
         data.put("dyes", dyes);
         write(Path.of(args[0]), data);
         if (fixtures) {
@@ -187,9 +190,118 @@ public class Extract {
             fixture.put("potions", potionFixtures);
             fixture.put("effectMixtures", effectMixtures());
             fixture.put("fluidStates", Map.of("stateCount", fluidStates.stateCount, "samples", fluidStates.samples));
+            fixture.put("blockAppearance", appearance.fixtures());
             write(Path.of(args[1]), fixture);
         }
         System.out.println("Extracted Minecraft " + minecraftVersion + ": " + counts);
+    }
+
+    private static final class BlockAppearance {
+        private final Map<String, Object> offsets = new TreeMap<>();
+        private final Map<String, Object> layers = new TreeMap<>();
+        private final List<Object> offsetSamples = new ArrayList<>();
+        private final List<Object> layerSamples = new ArrayList<>();
+        private int stateCount;
+        private int offsetChecks;
+        private int layerChecks;
+        private static final int[][] POSITIONS = {{0, 0, 0}, {1, 7, 2}, {-17, -64, 31},
+            {7, 255, -3}, {7, -20, -3}, {30000000, 319, -30000000}};
+
+        private BlockAppearance(Registry<Block> registry, boolean fixtures) throws Exception {
+            Method offset;
+            try { offset = BlockState.class.getMethod("getOffset", BlockPos.class); }
+            catch (NoSuchMethodException older) { offset = BlockState.class.getMethod("getOffset", BlockGetter.class, BlockPos.class); }
+            Method layer = null, setCutout = null;
+            Class<?> types = null;
+            try { types = Class.forName("net.minecraft.client.renderer.ItemBlockRenderTypes"); }
+            catch (ClassNotFoundException spriteLayers) {}
+            var overrides = new TreeMap<String, Object>();
+            if (types != null) {
+                layer = types.getMethod("getChunkRenderType", BlockState.class);
+                try { setCutout = types.getMethod("setCutoutLeaves", boolean.class); }
+                catch (NoSuchMethodException older) { setCutout = types.getMethod("setFancy", boolean.class); }
+                layers.put("source", "block");
+                layers.put("default", "solid");
+                layers.put("blocks", overrides);
+            } else {
+                Class<?> transparency = Class.forName("com.mojang.blaze3d.platform.Transparency");
+                Method byTransparency = Class.forName("net.minecraft.client.renderer.chunk.ChunkSectionLayer")
+                    .getMethod("byTransparency", transparency);
+                Method of = transparency.getMethod("of", boolean.class, boolean.class);
+                layers.put("source", "sprite");
+                for (boolean transparent : new boolean[] {false, true}) {
+                    for (boolean translucent : new boolean[] {false, true}) {
+                        String value = layerName(byTransparency.invoke(null, of.invoke(null, transparent, translucent)));
+                        String key = translucent ? "translucent" : transparent ? "cutout" : "opaque";
+                        if (layers.containsKey(key) && !layers.get(key).equals(value)) throw new IllegalStateException("Unsupported sprite layer policy");
+                        layers.put(key, value);
+                        if (fixtures) layerSamples.add(Map.of("transparent", transparent, "translucent", translucent, "layer", value));
+                        layerChecks++;
+                    }
+                }
+            }
+            for (Block block : registry) {
+                String id = registry.getKey(block).toString();
+                BlockState defaultState = block.defaultBlockState();
+                Vec3 origin = offset(offset, defaultState, BlockPos.ZERO);
+                double horizontal = Math.abs(origin.x), vertical = Math.abs(origin.y);
+                if (origin.z != origin.x || origin.x > 0 || origin.y > 0) throw new IllegalStateException("Unsupported block offset: " + id);
+                if (horizontal != 0 || vertical != 0) offsets.put(id, Map.of("type", vertical == 0 ? "xz" : "xyz",
+                    "horizontal", horizontal, "vertical", vertical));
+                var defaultLayers = new TreeMap<String, String>();
+                for (BlockState state : block.getStateDefinition().getPossibleStates()) {
+                    stateCount++;
+                    for (int[] coordinates : POSITIONS) {
+                        BlockPos pos = new BlockPos(coordinates[0], coordinates[1], coordinates[2]);
+                        Vec3 actual = offset(offset, state, pos);
+                        long seed = net.minecraft.util.Mth.getSeed(pos.getX(), 0, pos.getZ());
+                        double x = Math.max(-horizontal, Math.min(horizontal, ((float) (seed & 15L) / 15.0F - 0.5) * 0.5));
+                        double y = ((float) (seed >> 4 & 15L) / 15.0F - 1.0) * vertical;
+                        double z = Math.max(-horizontal, Math.min(horizontal, ((float) (seed >> 8 & 15L) / 15.0F - 0.5) * 0.5));
+                        if (actual.x != x || actual.y != y || actual.z != z) throw new IllegalStateException("Unsupported block offset at " + pos + ": " + id);
+                        offsetChecks++;
+                        if (fixtures && state == defaultState) offsetSamples.add(Map.of("block", id,
+                            "position", List.of(pos.getX(), pos.getY(), pos.getZ()), "offset", List.of(actual.x, actual.y, actual.z)));
+                    }
+                    if (layer != null) {
+                        for (boolean cutout : new boolean[] {false, true}) {
+                            setCutout.invoke(null, cutout);
+                            String name = cutout ? "cutoutLeaves" : "solidLeaves";
+                            String value = layerName(layer.invoke(null, state));
+                            String previous = defaultLayers.putIfAbsent(name, value);
+                            if (previous != null && !previous.equals(value)) throw new IllegalStateException("State-dependent block layer: " + id);
+                            layerChecks++;
+                            if (fixtures && state == defaultState) layerSamples.add(Map.of("block", id, "cutoutLeaves", cutout, "layer", value));
+                        }
+                    }
+                }
+                if (!defaultLayers.isEmpty() && !defaultLayers.values().stream().allMatch("solid"::equals)) overrides.put(id, defaultLayers);
+            }
+            if (setCutout != null) setCutout.invoke(null, true);
+        }
+
+        private static Vec3 offset(Method method, BlockState state, BlockPos pos) throws Exception {
+            return (Vec3) (method.getParameterCount() == 1 ? method.invoke(state, pos) : method.invoke(state, FluidStates.STATIC_WORLD, pos));
+        }
+
+        private static String layerName(Object layer) throws Exception {
+            if (layer instanceof Enum<?>) return ((Enum<?>) layer).name().toLowerCase(java.util.Locale.ROOT);
+            for (String name : new String[] {"solid", "cutoutMipped", "cutout", "translucent", "tripwire"}) {
+                if (layer == Class.forName("net.minecraft.client.renderer.RenderType").getMethod(name).invoke(null)) {
+                    return name.equals("cutoutMipped") ? "cutout_mipped" : name;
+                }
+            }
+            throw new IllegalStateException("Unsupported chunk render layer: " + layer);
+        }
+
+        private Map<String, Object> data() {
+            return Map.of("offsetAlgorithm", "minecraft-position-v1", "offsets", offsets, "renderLayers", layers);
+        }
+
+        private Map<String, Object> fixtures() {
+            return Map.of("stateCount", stateCount, "offsetChecks", offsetChecks, "layerChecks", layerChecks,
+                "offsets", offsetSamples, "layers", layerSamples);
+        }
     }
 
     private static final class FluidStates {
