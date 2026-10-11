@@ -47,6 +47,6 @@ The dataset does not select a geometry algorithm. In particular, 1.16.5 and 1.17
 
 ## Validation
 
-Extraction enumerates every registered block state and checks profile references against the property domains. Native fixtures cover water, lava, partial shapes, transparent neighbors, and waterlogged states. For sampled states, a separate JavaScript rectangle-coverage check compares the exported boxes with vanilla's fluid-face occlusion result in all six directions at four heights. Manifest validation records the state, sample, and face-check counts.
+Extraction enumerates every registered block state and checks profile references against the property domains. Native fixtures cover water, lava, partial shapes, transparent neighbors, and waterlogged states. For sampled states, a separate JavaScript rectangle-coverage check compares the exported boxes with vanilla's fluid-face occlusion result in all six directions at four heights. Manifest validation records the state, sample, and face-check counts. `waterOverlay` mirrors the renderer's reviewed `HalfTransparentBlock`/`LeavesBlock` condition; these fixtures do not independently test sprite selection.
 
 Unknown context-dependent values remain explicit. The dataset does not simulate fluid spreading, update neighboring block states, or claim that static boxes replace world queries.

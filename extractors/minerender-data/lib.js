@@ -9,6 +9,9 @@ export const DATASETS = {
   blockTints: 'block-tints.json', legacyBlocks: 'legacy-blocks.json'
 };
 
+// Older published manifests may omit these runtime datasets.
+export const OPTIONAL_MANIFEST_DATASETS = ['fluidStates'];
+
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 
 export function isImpliedItemDefault(components) {

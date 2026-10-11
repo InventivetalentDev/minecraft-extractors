@@ -1,6 +1,6 @@
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { assert, object, identifier, isImpliedItemDefault, versionId, DATASETS, sha256, stableStringify } from './lib.js';
+import { assert, object, identifier, isImpliedItemDefault, versionId, DATASETS, OPTIONAL_MANIFEST_DATASETS, sha256, stableStringify } from './lib.js';
 import { buildRules, UnsupportedRulesVersionError } from './rules.js';
 import { registryCompatibility } from './support.js';
 import { validateFluidStates, validateFluidFixtures } from './fluid-states.js';
@@ -132,8 +132,7 @@ export async function validateDirectory(directory, expectedVersion) {
     assert(Object.hasOwn(DATASETS, name) && typeof reason === 'string' && reason.length > 0
       && !Object.hasOwn(manifest.datasets, name), `Invalid unavailable dataset: ${name}`);
   }
-  // Older manifests predate the per-state fluid dataset.
-  for (const name of Object.keys(DATASETS).filter(name => name !== 'fluidStates')) {
+  for (const name of Object.keys(DATASETS).filter(name => !OPTIONAL_MANIFEST_DATASETS.includes(name))) {
     assert(Object.hasOwn(manifest.datasets, name) || Object.hasOwn(unavailable, name), `Unreported dataset: ${name}`);
   }
   const allowed = new Set(['manifest.json', 'version.json', '_list.json']);
