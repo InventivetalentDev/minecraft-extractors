@@ -28,10 +28,12 @@ export function validateLegacyBiomeFixtures(data, samples) {
     assert(Number.isSafeInteger(sample.id) && typeof sample.known === 'boolean' && !seen.has(sample.id), 'Invalid native legacy biome fixture');
     seen.add(sample.id);
     if (sample.known) {
+      assert(sample.registered === true, `Native target biome is not registered: ${sample.id}`);
       assert(Object.hasOwn(data.ids, sample.id) && legacyBiomeName(data, sample.id) === sample.nativeName, `Native legacy biome differs: ${sample.id}`);
     } else {
       assert(UNKNOWN_IDS.includes(sample.id) && legacyBiomeName(data, sample.id) === undefined, `Unexpected legacy biome fallback: ${sample.id}`);
-      assert(sample.nativeName === (data.source === DATA_FIX ? 'minecraft:plains' : null), 'Native unknown-biome behavior differs');
+      assert(sample.nativeName === (data.source === DATA_FIX ? 'minecraft:plains' : null)
+        && sample.registered === (data.source === DATA_FIX), 'Native unknown-biome behavior differs');
     }
   }
   assert(Object.keys(data.ids).every(id => seen.has(Number(id))) && UNKNOWN_IDS.every(id => seen.has(id)), 'Incomplete native legacy biome IDs');

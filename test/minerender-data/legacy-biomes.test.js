@@ -3,18 +3,25 @@ import assert from 'node:assert/strict';
 import { legacyBiomeName, validateLegacyBiomes, validateLegacyBiomeFixtures } from '../../extractors/minerender-data/legacy-biomes.js';
 
 function fixture(source = 'net.minecraft.data.worldgen.biome.Biomes') {
-  const data = { format: 'legacy-numeric', source, ids: { 0: 'minecraft:ocean', 1: 'minecraft:plains', 3: 'minecraft:mountains', 170: 'minecraft:soul_sand_valley' } };
-  const samples = Object.entries(data.ids).map(([id, nativeName]) => ({ id: Number(id), known: true, nativeName }));
+  const modern = source.endsWith('ChunkHeightAndBiomeFix');
+  const data = { format: 'legacy-numeric', source, ids: { 0: 'minecraft:ocean', 1: 'minecraft:plains',
+    3: modern ? 'minecraft:windswept_hills' : 'minecraft:mountains',
+    12: modern ? 'minecraft:snowy_plains' : 'minecraft:snowy_tundra',
+    47: modern ? 'minecraft:warm_ocean' : 'minecraft:deep_warm_ocean', 170: 'minecraft:soul_sand_valley' } };
+  const samples = Object.entries(data.ids).map(([id, nativeName]) => ({ id: Number(id), known: true, nativeName, registered: true }));
   samples.push(...[-1, 176, 255, 9999].map(id => ({ id, known: false,
-    nativeName: source.endsWith('ChunkHeightAndBiomeFix') ? 'minecraft:plains' : null })));
+    nativeName: modern ? 'minecraft:plains' : null, registered: modern })));
   return { data, samples };
 }
 
-test('legacy IDs retain historical names and unknown IDs do not become plains', () => {
+test('legacy IDs resolve to target-version names and unknown IDs do not become plains', () => {
   for (const source of ['net.minecraft.data.worldgen.biome.Biomes', 'net.minecraft.util.datafix.fixes.ChunkHeightAndBiomeFix']) {
     const { data, samples } = fixture(source);
-    assert.deepEqual(validateLegacyBiomeFixtures(data, samples), { legacyBiomeIds: 4, legacyBiomeSamples: 8 });
-    assert.equal(legacyBiomeName(data, 3), 'minecraft:mountains');
+    assert.deepEqual(validateLegacyBiomeFixtures(data, samples), { legacyBiomeIds: 6, legacyBiomeSamples: 10 });
+    const modern = source.endsWith('ChunkHeightAndBiomeFix');
+    assert.equal(legacyBiomeName(data, 3), modern ? 'minecraft:windswept_hills' : 'minecraft:mountains');
+    assert.equal(legacyBiomeName(data, 12), modern ? 'minecraft:snowy_plains' : 'minecraft:snowy_tundra');
+    assert.equal(legacyBiomeName(data, 47), modern ? 'minecraft:warm_ocean' : 'minecraft:deep_warm_ocean');
     assert.equal(legacyBiomeName(data, 170), 'minecraft:soul_sand_valley');
     for (const id of [-1, 176, 255, 9999, 0.5, '3', NaN]) assert.equal(legacyBiomeName(data, id), undefined);
   }
@@ -24,6 +31,7 @@ test('native validation requires every ID and rejects renaming, duplicates, and 
   for (const [change, pattern] of [
     [samples => samples.pop(), /Incomplete native legacy biome fixtures/],
     [samples => { samples[2].nativeName = 'minecraft:windswept_hills'; }, /Native legacy biome differs/],
+    [samples => { samples[2].registered = false; }, /target biome is not registered/],
     [samples => { samples[1] = samples[0]; }, /Invalid native legacy biome fixture/],
     [samples => { samples.at(-1).id = 2; }, /Unexpected legacy biome fallback/],
     [samples => { samples.at(-1).nativeName = 'minecraft:plains'; }, /unknown-biome behavior/]
@@ -32,6 +40,12 @@ test('native validation requires every ID and rejects renaming, duplicates, and 
     change(samples);
     assert.throws(() => validateLegacyBiomeFixtures(data, samples), pattern);
   }
+});
+
+test('native target fixtures reject names left at the numeric-conversion schema', () => {
+  const { data, samples } = fixture('net.minecraft.util.datafix.fixes.ChunkHeightAndBiomeFix');
+  data.ids[3] = 'minecraft:mountains';
+  assert.throws(() => validateLegacyBiomeFixtures(data, samples), /Native legacy biome differs/);
 });
 
 test('schema validation rejects registry order, malformed IDs, and invented fallback IDs', () => {

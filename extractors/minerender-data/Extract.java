@@ -5,6 +5,7 @@ import com.mojang.serialization.Codec;
 import com.mojang.serialization.DynamicOps;
 import com.mojang.serialization.JsonOps;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import com.mojang.serialization.Dynamic;
 import it.unimi.dsi.fastutil.ints.Int2IntFunction;
 import java.io.InputStreamReader;
@@ -31,6 +32,8 @@ import net.minecraft.core.Registry;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.util.datafix.DataFixers;
+import net.minecraft.util.datafix.fixes.References;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -166,7 +169,7 @@ public class Extract {
         var fluidStates = new FluidStates(blockRegistry, fixtures);
         var appearance = new BlockAppearance(blockRegistry, fixtures);
         var blockLighting = new BlockLighting(blockRegistry, minecraftVersion);
-        var legacyBiomes = new LegacyBiomes(fixtures);
+        var legacyBiomes = new LegacyBiomes(dataVersionNumber, fixtures);
 
         var dyes = new TreeMap<String, Object>();
         for (var dye : DyeColor.values()) {
@@ -337,7 +340,7 @@ public class Extract {
         private final Map<String, String> ids = new TreeMap<>();
         private final List<Object> samples = new ArrayList<>();
 
-        private LegacyBiomes(boolean fixtures) throws Exception {
+        private LegacyBiomes(int dataVersion, boolean fixtures) throws Exception {
             Class<?> owner;
             java.lang.reflect.Field field;
             Method lookup;
@@ -356,9 +359,12 @@ public class Extract {
             source = owner.getName();
             field.setAccessible(true);
             Map<?, ?> values = (Map<?, ?>) field.get(null);
+            Set<String> registered = registeredBiomes();
             for (var entry : values.entrySet()) {
                 if (!(entry.getKey() instanceof Integer)) throw new IllegalStateException("Non-numeric legacy biome ID");
                 String name = dataFix ? (String) entry.getValue() : accessor(entry.getValue(), "location").toString();
+                if (dataFix) name = migrateName(name, dataVersion);
+                if (!registered.contains(name)) throw new IllegalStateException("Unregistered target biome: " + name);
                 ids.put(entry.getKey().toString(), name);
             }
             if (fixtures) {
@@ -371,7 +377,7 @@ public class Extract {
                     if (dataFix) {
                         Int2IntFunction storage = index -> id;
                         Dynamic<?> converted = (Dynamic<?>) lookup.invoke(null, new Dynamic<>(JsonOps.INSTANCE, new JsonObject()), storage);
-                        nativeName = converted.get("palette").asStream().findFirst().orElseThrow().asString().result().orElseThrow();
+                        nativeName = migrateName(converted.get("palette").asStream().findFirst().orElseThrow().asString().result().orElseThrow(), dataVersion);
                     } else {
                         Object key = lookup.invoke(null, id);
                         nativeName = key == null ? null : accessor(key, "location").toString();
@@ -380,9 +386,38 @@ public class Extract {
                     sample.put("id", id);
                     sample.put("known", values.containsKey(id));
                     sample.put("nativeName", nativeName);
+                    sample.put("registered", nativeName != null && registered.contains(nativeName));
                     samples.add(sample);
                 }
             }
+        }
+
+        private static String migrateName(String name, int dataVersion) {
+            // The numeric conversion table predates the biome renames after schema 2832.
+            return DataFixers.getDataFixer().update(References.BIOME,
+                new Dynamic<>(JsonOps.INSTANCE, new JsonPrimitive(name)), 2832, dataVersion).asString().result().orElseThrow();
+        }
+
+        private static Set<String> registeredBiomes() throws Exception {
+            var names = new HashSet<String>();
+            try {
+                var registry = (Registry<?>) Class.forName("net.minecraft.data.BuiltinRegistries").getField("BIOME").get(null);
+                for (Object key : registry.keySet()) names.add(key.toString());
+            } catch (ClassNotFoundException | NoSuchFieldException modern) {
+                if (registryLookup == null) {
+                    Class<?> vanilla = Class.forName("net.minecraft.data.registries.VanillaRegistries");
+                    Method lookup = optionalMethod(vanilla, "createWorldLookup");
+                    if (lookup == null) lookup = vanilla.getMethod("createLookup");
+                    registryLookup = lookup.invoke(null);
+                }
+                Object key = Class.forName("net.minecraft.core.registries.Registries").getField("BIOME").get(null);
+                Object lookup = Class.forName("net.minecraft.core.HolderLookup$Provider")
+                    .getMethod("lookupOrThrow", Class.forName("net.minecraft.resources.ResourceKey")).invoke(registryLookup, key);
+                var keys = (java.util.stream.Stream<?>) Class.forName("net.minecraft.core.HolderLookup")
+                    .getMethod("listElementIds").invoke(lookup);
+                for (Object entry : keys.toList()) names.add(accessor(entry, "identifier", "location").toString());
+            }
+            return names;
         }
 
         private Map<String, Object> data() {
