@@ -4,6 +4,7 @@ import { assert, object, identifier, isImpliedItemDefault, versionId, DATASETS, 
 import { buildRules, UnsupportedRulesVersionError } from './rules.js';
 import { registryCompatibility } from './support.js';
 import { validateBlockAppearance, validateAppearanceFixtures } from './block-appearance.js';
+import { validateLegacyBiomes, validateLegacyBiomeFixtures } from './legacy-biomes.js';
 import { validateFluidStates, validateFluidFixtures } from './fluid-states.js';
 import { validateBlockLighting } from './block-lighting.js';
 
@@ -54,6 +55,7 @@ export function validateRuntime(data, version) {
   for (const values of [data.itemDefaults, effects, potions, data.blockStates, data.fluids]) assert(Object.keys(values).length > 0, 'Extracted dataset is empty');
   if (data.blockAppearance !== undefined) validateBlockAppearance(data.blockAppearance, data.blockStates);
   if (data.itemProperties !== undefined) validateItemProperties(data.itemProperties, data.itemDefaults);
+  if (data.legacyBiomes !== undefined) validateLegacyBiomes(data.legacyBiomes);
   if (data.fluidStates !== undefined) validateFluidStates(data.fluidStates, data.blockStates);
   if (data.blockLighting !== undefined) validateBlockLighting(data.blockLighting, data.blockStates);
 }
@@ -112,6 +114,7 @@ export function validateFixtures(data, fixture) {
   const checks = { itemSamples: stacks, potionColors: Object.keys(fixture.potions).length, effectMixtures: fixture.effectMixtures.length };
   if (data.blockAppearance !== undefined) Object.assign(checks, validateAppearanceFixtures(data.blockAppearance, data.blockStates, fixture.blockAppearance));
   if (data.itemProperties !== undefined) Object.assign(checks, validateItemPropertyFixtures(data.itemProperties, fixture.itemProperties));
+  if (data.legacyBiomes !== undefined) Object.assign(checks, validateLegacyBiomeFixtures(data.legacyBiomes, fixture.legacyBiomes));
   if (data.fluidStates !== undefined) Object.assign(checks, validateFluidFixtures(data.fluidStates, data.blockStates, fixture.fluidStates));
   if (!durabilityBars) checks.unavailableChecks = { durabilityBars: 'Minecraft 1.16.5 does not expose native durability bar methods.' };
   return checks;

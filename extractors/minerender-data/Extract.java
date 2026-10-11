@@ -4,6 +4,9 @@ import com.google.gson.JsonElement;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DynamicOps;
 import com.mojang.serialization.JsonOps;
+import com.google.gson.JsonObject;
+import com.mojang.serialization.Dynamic;
+import it.unimi.dsi.fastutil.ints.Int2IntFunction;
 import java.io.InputStreamReader;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -163,6 +166,7 @@ public class Extract {
         var fluidStates = new FluidStates(blockRegistry, fixtures);
         var appearance = new BlockAppearance(blockRegistry, fixtures);
         var blockLighting = new BlockLighting(blockRegistry, minecraftVersion);
+        var legacyBiomes = new LegacyBiomes(fixtures);
 
         var dyes = new TreeMap<String, Object>();
         for (var dye : DyeColor.values()) {
@@ -196,6 +200,7 @@ public class Extract {
         data.put("fluidStates", fluidStates.data());
         data.put("blockAppearance", appearance.data());
         data.put("blockLighting", blockLighting.data());
+        data.put("legacyBiomes", legacyBiomes.data());
         data.put("dyes", dyes);
         write(Path.of(args[0]), data);
         if (fixtures) {
@@ -209,6 +214,7 @@ public class Extract {
             fixture.put("effectMixtures", effectMixtures());
             fixture.put("fluidStates", Map.of("stateCount", fluidStates.stateCount, "samples", fluidStates.samples));
             fixture.put("blockAppearance", appearance.fixtures());
+            fixture.put("legacyBiomes", legacyBiomes.samples);
             write(Path.of(args[1]), fixture);
         }
         System.out.println("Extracted Minecraft " + minecraftVersion + ": " + counts);
@@ -323,6 +329,64 @@ public class Extract {
         private Map<String, Object> fixtures() {
             return Map.of("stateCount", stateCount, "offsetChecks", offsetChecks, "layerChecks", layerChecks,
                 "offsets", offsetSamples, "layers", layerSamples);
+        }
+    }
+
+    private static final class LegacyBiomes {
+        private final String source;
+        private final Map<String, String> ids = new TreeMap<>();
+        private final List<Object> samples = new ArrayList<>();
+
+        private LegacyBiomes(boolean fixtures) throws Exception {
+            Class<?> owner;
+            java.lang.reflect.Field field;
+            Method lookup;
+            boolean dataFix = false;
+            try {
+                owner = Class.forName("net.minecraft.data.worldgen.biome.Biomes");
+                field = owner.getDeclaredField("TO_NAME");
+                lookup = owner.getMethod("byId", int.class);
+            } catch (ClassNotFoundException | NoSuchFieldException later) {
+                owner = Class.forName("net.minecraft.util.datafix.fixes.ChunkHeightAndBiomeFix");
+                field = owner.getDeclaredField("BIOMES_BY_ID");
+                lookup = owner.getDeclaredMethod("makeBiomeContainer", Dynamic.class, Int2IntFunction.class);
+                lookup.setAccessible(true);
+                dataFix = true;
+            }
+            source = owner.getName();
+            field.setAccessible(true);
+            Map<?, ?> values = (Map<?, ?>) field.get(null);
+            for (var entry : values.entrySet()) {
+                if (!(entry.getKey() instanceof Integer)) throw new IllegalStateException("Non-numeric legacy biome ID");
+                String name = dataFix ? (String) entry.getValue() : accessor(entry.getValue(), "location").toString();
+                ids.put(entry.getKey().toString(), name);
+            }
+            if (fixtures) {
+                var sampleIds = new ArrayList<Integer>();
+                for (Object id : values.keySet()) sampleIds.add((Integer) id);
+                sampleIds.addAll(List.of(-1, 176, 255, 9999));
+                sampleIds.sort(Integer::compareTo);
+                for (int id : sampleIds) {
+                    String nativeName;
+                    if (dataFix) {
+                        Int2IntFunction storage = index -> id;
+                        Dynamic<?> converted = (Dynamic<?>) lookup.invoke(null, new Dynamic<>(JsonOps.INSTANCE, new JsonObject()), storage);
+                        nativeName = converted.get("palette").asStream().findFirst().orElseThrow().asString().result().orElseThrow();
+                    } else {
+                        Object key = lookup.invoke(null, id);
+                        nativeName = key == null ? null : accessor(key, "location").toString();
+                    }
+                    var sample = new LinkedHashMap<String, Object>();
+                    sample.put("id", id);
+                    sample.put("known", values.containsKey(id));
+                    sample.put("nativeName", nativeName);
+                    samples.add(sample);
+                }
+            }
+        }
+
+        private Map<String, Object> data() {
+            return Map.of("format", "legacy-numeric", "source", source, "ids", ids);
         }
     }
 
