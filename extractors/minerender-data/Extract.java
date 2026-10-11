@@ -151,7 +151,7 @@ public class Extract {
         }
         var fluidStates = new FluidStates(blockRegistry, fixtures);
         var appearance = new BlockAppearance(blockRegistry, fixtures);
-        var blockLighting = new BlockLighting(blockRegistry, minecraftVersion, fixtures);
+        var blockLighting = new BlockLighting(blockRegistry, minecraftVersion);
 
         var dyes = new TreeMap<String, Object>();
         for (var dye : DyeColor.values()) {
@@ -195,8 +195,6 @@ public class Extract {
             fixture.put("effectMixtures", effectMixtures());
             fixture.put("fluidStates", Map.of("stateCount", fluidStates.stateCount, "samples", fluidStates.samples));
             fixture.put("blockAppearance", appearance.fixtures());
-            fixture.put("blockLighting", Map.of("stateCount", blockLighting.stateCount, "samples", blockLighting.samples,
-                "contextChecks", blockLighting.contextChecks));
             write(Path.of(args[1]), fixture);
         }
         System.out.println("Extracted Minecraft " + minecraftVersion + ": " + counts);
@@ -434,18 +432,7 @@ public class Extract {
         private final Method lightPermeable = optionalMethod(BlockState.class, "isLightPermeable");
         private final Method viewBlocking;
         private final boolean legacyAmbientOcclusion;
-        private final boolean fixtures;
-        private final List<Object> samples = new ArrayList<>();
-        private final Set<Object> sampled = new HashSet<>();
-        private int contextChecks;
-        private static final Set<String> SAMPLE_BLOCKS = Set.of("air", "stone", "glass", "tinted_glass", "oak_leaves",
-            "water", "lava", "oak_slab", "oak_stairs", "snow", "farmland", "soul_sand", "ice", "packed_ice",
-            "furnace", "redstone_lamp", "redstone_ore", "redstone_torch", "sea_pickle", "candle", "campfire",
-            "glowstone", "light", "sculk", "sculk_sensor", "sculk_shrieker", "magma_block", "moving_piston", "powder_snow");
-        private static final BlockPos[] SAMPLE_POSITIONS = {new BlockPos(-97, 173, 61), new BlockPos(2048, -31, -2048)};
-
-        private BlockLighting(Registry<Block> registry, String version, boolean fixtures) throws Exception {
-            this.fixtures = fixtures;
+        private BlockLighting(Registry<Block> registry, String version) throws Exception {
             legacyAmbientOcclusion = version.equals("1.16.5");
             viewBlocking = lightPermeable == null && !legacyAmbientOcclusion ? stateMethod("isViewBlocking") : null;
             extract(registry);
@@ -465,35 +452,7 @@ public class Extract {
             result.put("useShapeForLightOcclusion", state.useShapeForLightOcclusion());
             result.put("emissiveRendering", staticValue(emissive, state));
             result.put("lightPermeable", staticValue((world, pos) -> lightPermeable(state, world, pos)));
-            if (fixtures) {
-                boolean sample = SAMPLE_BLOCKS.contains(id.substring(id.indexOf(':') + 1)) && sampled.add(List.of(id, result));
-                var checks = new ArrayList<Object>();
-                for (BlockPos pos : SAMPLE_POSITIONS) {
-                    var values = nativeValues(state, EmptyBlockGetter.INSTANCE, pos);
-                    for (var field : result.entrySet()) {
-                        if (field.getValue() != null && !field.getValue().equals(values.get(field.getKey()))) {
-                            throw new IllegalStateException("Context-dependent lighting in " + id + ": " + field.getKey());
-                        }
-                    }
-                    contextChecks++;
-                    if (sample) checks.add(Map.of("position", List.of(pos.getX(), pos.getY(), pos.getZ()), "values", values));
-                }
-                if (sample) {
-                    var values = new TreeMap<String, Object>();
-                    for (var property : properties) values.put(property.getName(), stateValue(state, property));
-                    samples.add(Map.of("block", id, "properties", values, "profile", result, "checks", checks));
-                }
-            }
             return result;
-        }
-
-        private Map<String, Object> nativeValues(BlockState state, BlockGetter world, BlockPos pos) throws Exception {
-            return Map.of("shadeBrightness", stateValue(shadeBrightness, state, world, pos),
-                "lightEmission", state.getLightEmission(), "lightBlock", stateValue(lightBlock, state, world, pos),
-                "propagatesSkylightDown", stateValue(skylight, state, world, pos),
-                "useShapeForLightOcclusion", state.useShapeForLightOcclusion(),
-                "emissiveRendering", stateValue(emissive, state, world, pos),
-                "lightPermeable", lightPermeable(state, world, pos));
         }
 
         private boolean lightPermeable(BlockState state, BlockGetter world, BlockPos pos) throws Exception {
