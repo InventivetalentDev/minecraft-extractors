@@ -275,7 +275,11 @@ public class Extract {
                         }
                     }
                 }
-                if (!defaultLayers.isEmpty() && !defaultLayers.values().stream().allMatch("solid"::equals)) overrides.put(id, defaultLayers);
+                if (!defaultLayers.isEmpty()) {
+                    String solid = defaultLayers.get("solidLeaves"), cutout = defaultLayers.get("cutoutLeaves");
+                    if (!solid.equals(cutout)) overrides.put(id, defaultLayers);
+                    else if (!solid.equals("solid")) overrides.put(id, solid);
+                }
             }
             if (setCutout != null) setCutout.invoke(null, true);
         }

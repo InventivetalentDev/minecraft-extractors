@@ -18,7 +18,8 @@ export function blockOffset(data, id, [x, , z]) {
 export function blockRenderLayer(data, id, cutoutLeaves = true) {
   const layers = data.renderLayers;
   assert(layers.source === 'block', 'Sprite render layers require the active material transparency');
-  return layers.blocks[id]?.[cutoutLeaves ? 'cutoutLeaves' : 'solidLeaves'] ?? layers.default;
+  const value = layers.blocks[id];
+  return typeof value === 'string' ? value : value?.[cutoutLeaves ? 'cutoutLeaves' : 'solidLeaves'] ?? layers.default;
 }
 
 export function validateBlockAppearance(data, blockStates) {
@@ -35,8 +36,9 @@ export function validateBlockAppearance(data, blockStates) {
   if (layers.source === 'block') {
     assert(sameKeys(layers, ['source', 'default', 'blocks']) && layers.default === 'solid', 'Invalid block render-layer defaults');
     for (const [id, values] of object(layers.blocks, 'Block render layers')) {
-      assert(Object.hasOwn(blockStates, id) && values && sameKeys(values, ['solidLeaves', 'cutoutLeaves'])
-        && Object.values(values).every(layer => LAYERS.includes(layer)) && Object.values(values).some(layer => layer !== 'solid'), `Invalid block render layer: ${id}`);
+      assert(Object.hasOwn(blockStates, id) && (typeof values === 'string' ? LAYERS.includes(values) && values !== 'solid'
+        : values && sameKeys(values, ['solidLeaves', 'cutoutLeaves']) && Object.values(values).every(layer => LAYERS.includes(layer))
+          && values.solidLeaves !== values.cutoutLeaves), `Invalid block render layer: ${id}`);
     }
   } else {
     assert(sameKeys(layers, ['source', 'opaque', 'cutout', 'translucent']) && layers.opaque === 'solid'

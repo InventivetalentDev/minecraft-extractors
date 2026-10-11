@@ -11,7 +11,7 @@ function fixture() {
   const data = { offsetAlgorithm: 'minecraft-position-v1', offsets: {
     'minecraft:grass': { type: 'xyz', horizontal: 0.25, vertical: 0.2 }
   }, renderLayers: { source: 'block', default: 'solid', blocks: {
-    'minecraft:grass': { solidLeaves: 'cutout', cutoutLeaves: 'cutout' }
+    'minecraft:grass': 'cutout'
   } } };
   const blockStates = { 'minecraft:grass': {} };
   const native = { stateCount: 1, offsetChecks: 6, layerChecks: 2,
@@ -30,12 +30,18 @@ test('offsets match native negative and world-border coordinates without using h
 
 test('fixed layers preserve translucent glass, cutout-mipped leaves, and solid defaults', () => {
   const { data } = fixture();
-  data.renderLayers.blocks['minecraft:glass'] = { solidLeaves: 'translucent', cutoutLeaves: 'translucent' };
+  data.renderLayers.blocks['minecraft:glass'] = 'translucent';
   data.renderLayers.blocks['minecraft:oak_leaves'] = { solidLeaves: 'solid', cutoutLeaves: 'cutout_mipped' };
   assert.equal(blockRenderLayer(data, 'minecraft:glass'), 'translucent');
   assert.equal(blockRenderLayer(data, 'minecraft:oak_leaves', false), 'solid');
   assert.equal(blockRenderLayer(data, 'minecraft:oak_leaves'), 'cutout_mipped');
   assert.equal(blockRenderLayer(data, 'minecraft:stone'), 'solid');
+  const blockStates = Object.fromEntries(Object.keys(data.renderLayers.blocks).map(id => [id, {}]));
+  validateBlockAppearance(data, blockStates);
+  for (const value of ['solid', 'unknown', { solidLeaves: 'cutout', cutoutLeaves: 'cutout' }, { solidLeaves: 'solid' }]) {
+    data.renderLayers.blocks['minecraft:grass'] = value;
+    assert.throws(() => validateBlockAppearance(data, blockStates), /Invalid block render layer/);
+  }
 });
 
 test('sprite policy checks both transparency flags and does not supply fixed block layers', () => {
