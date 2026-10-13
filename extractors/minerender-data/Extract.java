@@ -171,6 +171,7 @@ public class Extract {
         var appearance = new BlockAppearance(blockRegistry, fixtures);
         var blockLighting = new BlockLighting(blockRegistry, minecraftVersion);
         var legacyBiomes = new LegacyBiomes(dataVersionNumber, fixtures);
+        var renames = new Renames(dataVersionNumber, fixtures);
         var blockCulling = new BlockCulling(blockRegistry, fixtures);
 
         var dyes = new TreeMap<String, Object>();
@@ -207,6 +208,7 @@ public class Extract {
         data.put("blockAppearance", appearance.data());
         data.put("blockLighting", blockLighting.data());
         data.put("legacyBiomes", legacyBiomes.data());
+        data.put("renames", renames.data());
         data.put("blockCulling", blockCulling.data());
         data.put("dyes", dyes);
         write(Path.of(args[0]), data);
@@ -222,6 +224,7 @@ public class Extract {
             fixture.put("fluidStates", Map.of("stateCount", fluidStates.stateCount, "samples", fluidStates.samples));
             fixture.put("blockAppearance", appearance.fixtures());
             fixture.put("legacyBiomes", legacyBiomes.samples);
+            fixture.put("renames", renames.samples);
             fixture.put("blockCulling", Map.of("blockCount", blocks.size(), "states", blockCulling.sampleStates, "pairs", blockCulling.samples));
             write(Path.of(args[1]), fixture);
         }
@@ -337,6 +340,96 @@ public class Extract {
         private Map<String, Object> fixtures() {
             return Map.of("stateCount", stateCount, "offsetChecks", offsetChecks, "layerChecks", layerChecks,
                 "offsets", offsetSamples, "layers", layerSamples);
+        }
+    }
+
+    private static final class Renames {
+        // Minecraft 1.13. Older input uses pre-flattening names, which a name table cannot describe.
+        private static final int BASE_DATA_VERSION = 1519;
+        private final Map<String, Object> kinds = new TreeMap<>();
+        private final List<Object> samples = new ArrayList<>();
+        private final int dataVersion;
+
+        private Renames(int dataVersion, boolean fixtures) throws Exception {
+            this.dataVersion = dataVersion;
+            var candidates = new java.util.TreeSet<String>();
+            var pattern = java.util.regex.Pattern.compile("minecraft:[a-z0-9_./-]+");
+            // The fixer's rename tables use string literals, so its class constant pools contain the old IDs.
+            try (var jar = new java.util.zip.ZipFile(Path.of(DataFixers.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toFile())) {
+                var entries = jar.entries();
+                while (entries.hasMoreElements()) {
+                    var entry = entries.nextElement();
+                    if (!entry.getName().startsWith("net/minecraft/util/datafix/") || !entry.getName().endsWith(".class")) continue;
+                    try (var input = jar.getInputStream(entry)) {
+                        var matcher = pattern.matcher(new String(input.readAllBytes(), StandardCharsets.ISO_8859_1));
+                        while (matcher.find()) candidates.add(matcher.group());
+                    }
+                }
+            }
+            String[] names = { "blocks", "items", "entities" };
+            String[] registries = { "BLOCK", "ITEM", "ENTITY_TYPE" };
+            var types = List.of(References.BLOCK_NAME, References.ITEM_NAME, References.ENTITY_NAME);
+            String[] controls = { "minecraft:stone", "minecraft:stick", "minecraft:pig" };
+            for (int i = 0; i < names.length; i++) {
+                var type = types.get(i);
+                var registered = new HashSet<String>();
+                for (Object key : registry(registries[i]).keySet()) registered.add(key.toString());
+                var ids = new TreeMap<String, Object>();
+                for (String id : candidates) {
+                    var ranges = new ArrayList<Map<String, Object>>();
+                    ranges(type, id, BASE_DATA_VERSION, dataVersion, ranges);
+                    for (var range : ranges) {
+                        String target = (String) range.get("to");
+                        if (target.equals(id)) throw new IllegalStateException("Unsupported rename history: " + id);
+                        if (!registered.contains(target)) throw new IllegalStateException("Unregistered rename target: " + target);
+                        if (fixtures) {
+                            int before = (Integer) range.get("before");
+                            sample(names[i], type, id, before - 1);
+                            sample(names[i], type, id, before);
+                        }
+                    }
+                    if (!ranges.isEmpty()) {
+                        var entry = new LinkedHashMap<String, Object>();
+                        entry.put("registered", registered.contains(id));
+                        entry.put("ranges", ranges);
+                        ids.put(id, entry);
+                    }
+                }
+                kinds.put(names[i], ids);
+                if (fixtures) sample(names[i], type, controls[i], BASE_DATA_VERSION);
+            }
+        }
+
+        private String fix(com.mojang.datafixers.DSL.TypeReference type, String name, int from) {
+            return DataFixers.getDataFixer().update(type,
+                new Dynamic<>(JsonOps.INSTANCE, new JsonPrimitive(name)), from, dataVersion).asString().result().orElseThrow();
+        }
+
+        private void ranges(com.mojang.datafixers.DSL.TypeReference type, String name, int lo, int hi, List<Map<String, Object>> out) {
+            String a = fix(type, name, lo), b = fix(type, name, hi);
+            if (a.equals(b)) return;
+            if (hi - lo == 1) {
+                var range = new LinkedHashMap<String, Object>();
+                range.put("before", hi);
+                range.put("to", a);
+                out.add(range);
+                return;
+            }
+            int mid = (lo + hi) >>> 1;
+            ranges(type, name, lo, mid, out);
+            ranges(type, name, mid, hi, out);
+        }
+
+        private void sample(String kind, com.mojang.datafixers.DSL.TypeReference type, String id, int from) {
+            samples.add(Map.of("kind", kind, "id", id, "dataVersion", from, "nativeName", fix(type, id, from)));
+        }
+
+        private Map<String, Object> data() {
+            var data = new LinkedHashMap<String, Object>();
+            data.put("format", "data-fixer-renames");
+            data.put("baseDataVersion", BASE_DATA_VERSION);
+            data.putAll(kinds);
+            return data;
         }
     }
 

@@ -5,6 +5,7 @@ import { assert, object, identifier, isImpliedItemDefault, versionId, DATASETS, 
 import { buildRules, UnsupportedRulesVersionError } from './rules.js';
 import { registryCompatibility } from './support.js';
 import { validateBlockAppearance, validateAppearanceFixtures } from './block-appearance.js';
+import { validateRenames, validateRenameFixtures } from './renames.js';
 import { validateLegacyBiomes, validateLegacyBiomeFixtures } from './legacy-biomes.js';
 import { validateFluidStates, validateFluidFixtures } from './fluid-states.js';
 import { validateBlockLighting } from './block-lighting.js';
@@ -57,6 +58,7 @@ export function validateRuntime(data, version) {
   if (data.blockAppearance !== undefined) validateBlockAppearance(data.blockAppearance, data.blockStates);
   if (data.itemProperties !== undefined) validateItemProperties(data.itemProperties, data.itemDefaults);
   if (data.legacyBiomes !== undefined) validateLegacyBiomes(data.legacyBiomes);
+  if (data.renames !== undefined) validateRenames(data.renames, data.blockStates, data.metadata.dataVersion);
   if (data.fluidStates !== undefined) validateFluidStates(data.fluidStates, data.blockStates);
   if (data.blockLighting !== undefined) validateBlockLighting(data.blockLighting, data.blockStates);
   if (data.blockCulling !== undefined) {
@@ -120,6 +122,7 @@ export function validateFixtures(data, fixture) {
   if (data.blockAppearance !== undefined) Object.assign(checks, validateAppearanceFixtures(data.blockAppearance, data.blockStates, fixture.blockAppearance));
   if (data.itemProperties !== undefined) Object.assign(checks, validateItemPropertyFixtures(data.itemProperties, fixture.itemProperties));
   if (data.legacyBiomes !== undefined) Object.assign(checks, validateLegacyBiomeFixtures(data.legacyBiomes, fixture.legacyBiomes));
+  if (data.renames !== undefined) Object.assign(checks, validateRenameFixtures(data.renames, fixture.renames, data.blockStates, data.metadata.dataVersion));
   if (data.fluidStates !== undefined) Object.assign(checks, validateFluidFixtures(data.fluidStates, data.blockStates, fixture.fluidStates));
   if (data.blockCulling !== undefined) Object.assign(checks, validateBlockCullingFixtures(data.blockCulling, data.blockStates, data.fluidStates, fixture.blockCulling));
   if (!durabilityBars) checks.unavailableChecks = { durabilityBars: 'Minecraft 1.16.5 does not expose native durability bar methods.' };
