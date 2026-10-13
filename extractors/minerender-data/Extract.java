@@ -320,7 +320,7 @@ public class Extract {
         }
 
         private static Vec3 offset(Method method, BlockState state, BlockPos pos) throws Exception {
-            return (Vec3) (method.getParameterCount() == 1 ? method.invoke(state, pos) : method.invoke(state, STATIC_WORLD, pos));
+            return (Vec3) (method.getParameterCount() == 1 ? method.invoke(state, pos) : method.invoke(state, StaticWorld.INSTANCE, pos));
         }
 
         private static String layerName(Object layer) throws Exception {
@@ -589,7 +589,7 @@ public class Extract {
                         for (float height : new float[] {0.125F, 0.5F, 8.0F / 9.0F, 1.0F}) {
                             Object result = nativeOcclusion.getParameterCount() == 3
                                 ? nativeOcclusion.invoke(null, direction, height, state)
-                                : nativeOcclusion.invoke(null, STATIC_WORLD, direction, height, BlockPos.ZERO, state);
+                                : nativeOcclusion.invoke(null, StaticWorld.INSTANCE, direction, height, BlockPos.ZERO, state);
                             tests.add(Map.of("direction", direction.getName(), "height", height, "occluded", result));
                         }
                     }
@@ -707,12 +707,16 @@ public class Extract {
     }
 
     // A world-dependent result cannot be represented by one profile for a block state.
-    private static final BlockGetter STATIC_WORLD = (BlockGetter) Proxy.newProxyInstance(BlockGetter.class.getClassLoader(),
-        new Class<?>[] {BlockGetter.class}, (proxy, method, args) -> {
-            // Vanilla's maximum light level is constant; block and entity reads need a real world.
-            if (method.getName().equals("getMaxLightLevel")) return method.invoke(EmptyBlockGetter.INSTANCE);
-            throw new ContextRead();
-        });
+    // Java 17 initializes the types in BlockGetter's method signatures when it creates the proxy class, and
+    // Minecraft's block classes cannot initialize before Bootstrap.bootStrap(). The holder delays creation to first use.
+    private static final class StaticWorld {
+        private static final BlockGetter INSTANCE = (BlockGetter) Proxy.newProxyInstance(BlockGetter.class.getClassLoader(),
+            new Class<?>[] {BlockGetter.class}, (proxy, method, args) -> {
+                // Vanilla's maximum light level is constant; block and entity reads need a real world.
+                if (method.getName().equals("getMaxLightLevel")) return method.invoke(EmptyBlockGetter.INSTANCE);
+                throw new ContextRead();
+            });
+    }
 
     private static <T extends Comparable<T>> Object stateValue(BlockState state, Property<T> property) {
         return propertyValue(property, state.getValue(property));
@@ -747,8 +751,8 @@ public class Extract {
 
     private static Object staticValue(StateCall call) throws Exception {
         try {
-            Object value = normalized(call.get(STATIC_WORLD, BlockPos.ZERO));
-            Object shifted = normalized(call.get(STATIC_WORLD, new BlockPos(7, 31, -3)));
+            Object value = normalized(call.get(StaticWorld.INSTANCE, BlockPos.ZERO));
+            Object shifted = normalized(call.get(StaticWorld.INSTANCE, new BlockPos(7, 31, -3)));
             return java.util.Objects.equals(value, shifted) ? value : null;
         } catch (InvocationTargetException error) {
             if (error.getCause() instanceof ContextRead) return null;
