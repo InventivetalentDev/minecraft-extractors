@@ -11,9 +11,6 @@ export async function extractDatasets(version, output, options = {}) {
   versionId(version);
   const datasets = datasetNames(options.dataset);
   const legacy = version === '1.16.5';
-  if (legacy && datasets.includes('entity-models') && (!options.entityDump || !options.blockEntityDump)) {
-    throw new Error('Minecraft 1.16.5 entity extraction requires --entity-dump FILE and --block-entity-dump FILE; use --dataset minerender-data for registry-only extraction');
-  }
   if (datasets.includes('minerender-data')) assertSupportedVersion(version);
   if (options.fixtures && !datasets.includes('minerender-data')) throw new Error('--fixtures requires minerender-data');
   output = path.resolve(output);
@@ -32,8 +29,8 @@ export async function extractDatasets(version, output, options = {}) {
       const destination = path.join(scratch, dataset);
       if (dataset === 'entity-models') {
         if (legacy) {
-          const { convertLegacyFiles } = await import('../extractors/entity-models/convert-legacy.js');
-          await convertLegacyFiles([options.entityDump, options.blockEntityDump], destination, { ...options, logOutput: false });
+          const { extractLegacy } = await import('../extractors/entity-models/legacy-extract.js');
+          await extractLegacy(destination, { ...options, logOutput: false });
         } else {
           const { extract } = await import('../extractors/entity-models/extract.js');
           await extract(version, destination, { ...options, runtime, logOutput: false });
@@ -56,10 +53,9 @@ if (await isMain(import.meta.url)) {
     const { values } = parseArgs({ options: {
       version: { type: 'string' }, output: { type: 'string' }, dataset: { type: 'string', default: 'all' },
       cache: { type: 'string' }, offline: { type: 'boolean', default: false }, fixtures: { type: 'string' },
-      'entity-dump': { type: 'string' }, 'block-entity-dump': { type: 'string' }, 'legacy-cache': { type: 'string' }
+      'legacy-cache': { type: 'string' }
     } });
     if (!values.version || !values.output) throw new Error('Usage: node tools/extract.js --version VERSION --output DIR [--dataset all|entity-models|minerender-data] [--cache DIR] [--offline]');
-    await extractDatasets(values.version, values.output, { ...values,
-      entityDump: values['entity-dump'], blockEntityDump: values['block-entity-dump'], legacyCache: values['legacy-cache'] });
+    await extractDatasets(values.version, values.output, { ...values, legacyCache: values['legacy-cache'] });
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

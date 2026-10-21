@@ -31,7 +31,7 @@ import net.minecraft.resource.ReloadableResourceManagerImpl;
 import net.minecraft.resource.ResourceType;
 import net.minecraft.util.registry.Registry;
 
-/** Retains legacy field names while extracting omitted model arrays, feature layers, and sampled poses. */
+/** Extracts named model hierarchies, feature layers, and sampled poses from the 1.16.5 client. */
 @SuppressWarnings("unchecked")
 public class LegacyModels {
     private static final String[] COMPONENTS = {"pivotX", "pivotY", "pivotZ", "pitch", "yaw", "roll"};
@@ -54,7 +54,6 @@ public class LegacyModels {
         final List<Object> models = new ArrayList<>();
         final java.util.Set<String> aliases = new java.util.HashSet<>();
         final Map<String, Object> owners = new java.util.HashMap<>();
-        boolean named;
     }
 
     private record PoseCopy(Object target, Method method, Map<ModelPart, float[]> sourceDefaults) {}
@@ -99,10 +98,7 @@ public class LegacyModels {
         }
         // DragonHeadEntityModel inherits SkullEntityModel's cube but its render method draws only its own head.
         models.get("minecraft:dragon_skull").get("main").parts.remove("skull");
-        for (var model : models.values()) {
-            Layer main = model.get("main");
-            if (main.parts.values().stream().anyMatch(part -> hasChildren(part))) model.put("animated", namedLayer(main));
-        }
+        for (var model : models.values()) model.put("main", namedLayer(model.get("main")));
         Map<String, Object> geometry = new TreeMap<>();
         Map<String, Object> inventory = new TreeMap<>();
         for (var model : models.entrySet()) {
@@ -111,11 +107,8 @@ public class LegacyModels {
             for (var layer : model.getValue().entrySet()) {
                 Map<String, Object> parts = new TreeMap<>();
                 for (var part : layer.getValue().parts.entrySet()) {
-                    if (layer.getValue().named && isChild(part.getValue(), layer.getValue().parts.values())) continue;
-                    if (!layer.getValue().named && layer.getValue().aliases.contains(part.getKey()) && isChild(part.getValue(), layer.getValue().parts.values())) continue;
-                    Map<String, Object> shape = (Map<String, Object>) geometry(part.getValue(), layer.getValue().named ? layer.getValue().parts : null);
-                    // An unnamed layer lists a child field at its root too; the flag lets the converter tell the copies apart.
-                    if (!layer.getValue().named && isChild(part.getValue(), layer.getValue().parts.values())) shape.put("nested", true);
+                    if (isChild(part.getValue(), layer.getValue().parts.values())) continue;
+                    Map<String, Object> shape = (Map<String, Object>) geometry(part.getValue(), layer.getValue().parts);
                     parts.put(part.getKey(), shape);
                 }
                 layers.put(layer.getKey(), parts);
@@ -152,12 +145,9 @@ public class LegacyModels {
                 .filter(value -> value.getName().equals(methodName) && !value.isBridge()).findFirst().orElseThrow(() -> new IllegalArgumentException(id + ": missing " + methodName));
             Layer local = new Layer();
             collect(copy == null ? model : copy.target(), local);
-            if (layer.named) {
-                Map<ModelPart, float[]> owned = snapshot(local.parts.values());
-                local.parts.clear();
-                for (var part : layer.parts.entrySet()) if (owned.containsKey(part.getValue())) local.parts.put(part.getKey(), part.getValue());
-            } else local.parts.entrySet().removeIf(entry -> layer.parts.get(entry.getKey()) != entry.getValue() ||
-                layer.aliases.contains(entry.getKey()) && isChild(entry.getValue(), layer.parts.values()));
+            Map<ModelPart, float[]> owned = snapshot(local.parts.values());
+            local.parts.clear();
+            for (var part : layer.parts.entrySet()) if (owned.containsKey(part.getValue())) local.parts.put(part.getKey(), part.getValue());
             Map<ModelPart, float[]> defaults = snapshot(layer.parts.values());
             Map<String, Object> clips = new TreeMap<>();
             for (var entry : request.getAsJsonObject("clips").entrySet()) {
@@ -263,11 +253,6 @@ public class LegacyModels {
         return name;
     }
 
-    private static boolean hasChildren(ModelPart part) {
-        try { return ((List<?>) field(part, "children")).size() > 0; }
-        catch (Exception error) { throw new IllegalArgumentException(error); }
-    }
-
     private static boolean isChild(ModelPart part, Iterable<ModelPart> candidates) {
         try {
             for (ModelPart candidate : candidates) for (ModelPart child : (Iterable<ModelPart>) field(candidate, "children"))
@@ -278,7 +263,6 @@ public class LegacyModels {
 
     private static Layer namedLayer(Layer source) throws Exception {
         Layer layer = new Layer();
-        layer.named = true;
         layer.models.addAll(source.models);
         for (var part : source.parts.entrySet()) if (!source.aliases.contains(part.getKey()) && !layer.parts.containsValue(part.getValue())) layer.parts.put(part.getKey(), part.getValue());
         for (var part : source.parts.entrySet()) if (!layer.parts.containsValue(part.getValue())) layer.parts.put(part.getKey(), part.getValue());
@@ -333,7 +317,7 @@ public class LegacyModels {
         List<Object> children = new ArrayList<>();
         for (ModelPart child : (Iterable<ModelPart>) field(part, "children")) {
             Map<String, Object> geometry = (Map<String, Object>) geometry(child, names);
-            if (names != null) geometry.put("name", names.entrySet().stream().filter(entry -> entry.getValue() == child).findFirst().orElseThrow().getKey());
+            geometry.put("name", names.entrySet().stream().filter(entry -> entry.getValue() == child).findFirst().orElseThrow().getKey());
             children.add(geometry);
         }
         result.put("children", children);

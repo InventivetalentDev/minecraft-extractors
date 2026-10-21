@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Exact Minecraft version (1.16.5 requires minerender-data)
+        description: Exact Minecraft version
         type: string
         required: true
       dataset:
