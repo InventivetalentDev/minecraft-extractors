@@ -175,9 +175,8 @@ async function equipment(jar, entries, records, sources) {
 
 export async function extractTextures({ jar, records, modelLayers, entries: listed }) {
   let result = { report: { pairings: [], unpaired: [] }, sources: new Map() };
-  let entries = [];
+  const entries = listed ?? await listJar(jar);
   if (modelLayers) {
-    entries = listed ?? await listJar(jar);
     const classes = entries.filter(entry => /^net\/minecraft\/client\/renderer\/(?:entity|blockentity)\/.*\.class$/.test(entry))
       .map(entry => entry.slice(0, -6).replaceAll('/', '.')).sort();
     const dumps = [];
