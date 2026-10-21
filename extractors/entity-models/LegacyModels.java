@@ -48,6 +48,7 @@ public class LegacyModels {
         Map.entry("LlamaDecorFeatureRenderer", "decor"), Map.entry("SaddleFeatureRenderer", "saddle"));
     private static final Map<Class<?>, Class<?>> STUBS = new LinkedHashMap<>();
     private static Path work;
+    private static JsonObject names;
 
     private static class Layer {
         final Map<String, ModelPart> parts = new LinkedHashMap<>();
@@ -59,7 +60,8 @@ public class LegacyModels {
     private record PoseCopy(Object target, Method method, Map<ModelPart, float[]> sourceDefaults) {}
 
     public static void main(String[] args) throws Exception {
-        if (args.length != 2) throw new IllegalArgumentException("Usage: LegacyModels.java INPUT OUTPUT");
+        if (args.length != 3) throw new IllegalArgumentException("Usage: LegacyModels.java INPUT OUTPUT NAMES");
+        names = new JsonParser().parse(Files.readString(Path.of(args[2]))).getAsJsonObject();
         work = Path.of(args[1]).toAbsolutePath().getParent();
         Bootstrap.initialize();
         // Guardian poses read the camera entity; a null camera needs no client, world, or window setup.
@@ -96,8 +98,6 @@ public class LegacyModels {
         for (var entry : ((Map<?, ?>) skullTextures.get(null)).entrySet()) {
             if (entry.getKey().toString().equals("PLAYER")) textures.put("minecraft:" + skullIds.get("PLAYER"), entry.getValue().toString());
         }
-        // DragonHeadEntityModel inherits SkullEntityModel's cube but its render method draws only its own head.
-        models.get("minecraft:dragon_skull").get("main").parts.remove("skull");
         for (var model : models.values()) model.put("main", namedLayer(model.get("main")));
         Map<String, Object> geometry = new TreeMap<>();
         Map<String, Object> inventory = new TreeMap<>();
@@ -205,6 +205,20 @@ public class LegacyModels {
         }
     }
 
+    private static String partName(Field field) {
+        String className = field.getDeclaringClass().getName(), fieldName = field.getName();
+        JsonObject type = names.getAsJsonObject(className);
+        JsonObject fields = type == null ? null : type.getAsJsonObject("fields");
+        if (fields == null || !fields.has(fieldName)) throw new IllegalArgumentException("No Mojang name for " + className + "." + fieldName);
+        return fields.get(fieldName).getAsString();
+    }
+
+    private static String className(Class<?> type) {
+        JsonObject name = names.getAsJsonObject(type.getName());
+        if (name == null || !name.has("class")) throw new IllegalArgumentException("No Mojang name for " + type.getName());
+        return name.get("class").getAsString();
+    }
+
     private static void collect(Object value, Layer layer) throws Exception {
         if (value == null) return;
         if (value instanceof Model) {
@@ -212,24 +226,37 @@ public class LegacyModels {
             layer.models.removeIf(model -> model == value);
             layer.models.add(value);
         }
+        Map<String, Class<?>> declarations = new LinkedHashMap<>();
         for (Field field : fields(value.getClass())) {
             if (Modifier.isStatic(field.getModifiers())) continue;
+            Object iterable = Iterable.class.isAssignableFrom(field.getType()) ? read(field, value) : null;
+            String mappedName = null;
+            if (field.getType() == ModelPart.class || field.getType().isArray() && field.getType().getComponentType() == ModelPart.class) mappedName = partName(field);
+            else if (iterable instanceof Iterable<?> values) for (Object item : values) {
+                if (item instanceof ModelPart) { mappedName = partName(field); break; }
+            }
+            if (mappedName != null) {
+                Class<?> previous = declarations.putIfAbsent(mappedName, field.getDeclaringClass());
+                if (previous == field.getDeclaringClass()) throw new IllegalArgumentException("Duplicate part name: " + mappedName);
+                // Subclass fields hide superclass fields with the same Mojang name.
+                if (previous != null) continue;
+            }
             if (field.getType() == ModelPart.class) {
                 ModelPart part = (ModelPart) read(field, value);
-                if (part != null) put(layer, value, field.getName(), part);
+                if (part != null) put(layer, value, mappedName, part);
             }
             else if (field.getType().isArray() && field.getType().getComponentType() == ModelPart.class) {
                 Object array = read(field, value);
                 if (array == null) continue;
                 for (int index = 0; index < Array.getLength(array); index++) {
-                    String name = field.getName() + "_" + index;
+                    String name = mappedName + "_" + index;
                     layer.aliases.add(put(layer, value, name, (ModelPart) Array.get(array, index)));
                 }
-            } else if (Iterable.class.isAssignableFrom(field.getType()) && read(field, value) instanceof Iterable<?> values) {
+            } else if (iterable instanceof Iterable<?> values) {
                 int index = 0;
                 for (Object item : values) {
                     if (item instanceof ModelPart part && !layer.parts.containsValue(part)) {
-                        String name = field.getName() + "_" + index;
+                        String name = mappedName + "_" + index;
                         layer.aliases.add(put(layer, value, name, part));
                     }
                     index++;
@@ -240,13 +267,14 @@ public class LegacyModels {
 
     /**
      * Models of one renderer can reuse a field name. A second instance of the same model class replaces the
-     * first, as the renderer draws the later one; a part of another class takes that class as a prefix.
+     * first, as the renderer draws the later one; a part of another class takes its Mojang class name as a prefix.
      */
     private static String put(Layer layer, Object owner, String name, ModelPart part) {
         Object previous = layer.owners.get(name);
         if (previous != null && previous != owner && previous.getClass() != owner.getClass()) {
-            name = owner.getClass().getSimpleName() + "_" + name;
-            if (layer.parts.containsKey(name)) throw new IllegalArgumentException("Duplicate part name: " + name);
+            name = className(owner.getClass()) + "_" + name;
+            Object prefixed = layer.owners.get(name);
+            if (prefixed != null && prefixed.getClass() != owner.getClass()) throw new IllegalArgumentException("Duplicate part name: " + name);
         }
         layer.parts.put(name, part);
         layer.owners.put(name, owner);
