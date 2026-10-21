@@ -332,7 +332,8 @@ export async function addTextures(records, { jar, entries, modelLayers, renderer
   for (const model of records) for (const value of Object.values(model.layers)) delete value.textureLocation;
   const { report, sources, missing, textureEntries } = jar ? await extractTextures({ jar, entries, records, modelLayers })
     : { report: { pairings: [], unpaired: [] }, sources: new Map(), missing: applyStemTextures([], records) };
-  // The Java extractors read these from the renderers at runtime; no constant in the jar names them.
+  // Renderers take these from other classes, such as DefaultPlayerSkin, that renderer pairing does not read,
+  // so the Java extractors read the values from the renderers at runtime.
   for (const model of records) {
     if (!rendererTextures[model.id] || !model.layers.main) continue;
     model.layers.main.textureLocation = rendererTextures[model.id];
