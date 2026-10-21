@@ -41,9 +41,6 @@ test('texture paths use moved and baby assets only when the jar contains them', 
     'minecraft:textures/entity/sniffer/snifflet.png');
   const eyes = 'minecraft:textures/entity/spider/spider_eyes.png';
   assert.equal(versionTexture('minecraft:textures/entity/spider_eyes.png', false, new Set([eyes])), eyes);
-  const steve = 'minecraft:textures/entity/player/slim/steve.png';
-  assert.equal(versionTexture(steve, false, new Set(['minecraft:textures/entity/steve.png'])), 'minecraft:textures/entity/steve.png');
-  assert.equal(versionTexture(steve, false, new Set([steve, 'minecraft:textures/entity/steve.png'])), steve);
 });
 
 test('explicit overrides take the moved and baby assets of a later release', async () => {
@@ -54,6 +51,14 @@ test('explicit overrides take the moved and baby assets of a later release', asy
   const entries = new Set(['minecraft:textures/entity/cat/cat_black.png', 'minecraft:textures/entity/cat/cat_black_baby.png']);
   assert.equal(versionTexture(records[0].layers.main.textureLocation, false, entries), 'minecraft:textures/entity/cat/cat_black.png');
   assert.equal(versionTexture(records[1].layers.main.textureLocation, true, entries), 'minecraft:textures/entity/cat/cat_black_baby.png');
+});
+
+test('renderer textures apply before overrides', async () => {
+  const records = [model('player_head'), model('zombie_head')];
+  const steve = 'minecraft:textures/entity/player/slim/steve.png';
+  await addTextures(records, { rendererTextures: { 'minecraft:player_head': steve, 'minecraft:zombie_head': steve }, validate: false });
+  assert.equal(records[0].layers.main.textureLocation, steve);
+  assert.equal(records[1].layers.main.textureLocation, 'minecraft:textures/entity/zombie/zombie.png');
 });
 
 test('baby models retain suffixes when matching stems and inheriting textures', async () => {

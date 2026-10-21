@@ -175,8 +175,9 @@ async function equipment(jar, entries, records, sources) {
 
 export async function extractTextures({ jar, records, modelLayers, entries: listed }) {
   let result = { report: { pairings: [], unpaired: [] }, sources: new Map() };
-  const entries = listed ?? await listJar(jar);
+  let entries = [];
   if (modelLayers) {
+    entries = listed ?? await listJar(jar);
     const classes = entries.filter(entry => /^net\/minecraft\/client\/renderer\/(?:entity|blockentity)\/.*\.class$/.test(entry))
       .map(entry => entry.slice(0, -6).replaceAll('/', '.')).sort();
     const dumps = [];
@@ -327,10 +328,16 @@ export async function validateTextures(records, version, sources, { cache = DEFA
   }
 }
 
-export async function addTextures(records, { jar, entries, modelLayers, version, cache, offline, validate = true } = {}) {
+export async function addTextures(records, { jar, entries, modelLayers, rendererTextures = {}, version, cache, offline, validate = true } = {}) {
   for (const model of records) for (const value of Object.values(model.layers)) delete value.textureLocation;
   const { report, sources, missing, textureEntries } = jar ? await extractTextures({ jar, entries, records, modelLayers })
     : { report: { pairings: [], unpaired: [] }, sources: new Map(), missing: applyStemTextures([], records) };
+  // The Java extractors read these from the renderers at runtime; no constant in the jar names them.
+  for (const model of records) {
+    if (!rendererTextures[model.id] || !model.layers.main) continue;
+    model.layers.main.textureLocation = rendererTextures[model.id];
+    sources.set(key(model.id, 'main'), 'renderer');
+  }
   await applyOverrides(records, { sources });
   inheritBabyTextures(records, sources);
   // Overrides name the paths of the release they were reviewed on, so they take the moved and baby assets too.

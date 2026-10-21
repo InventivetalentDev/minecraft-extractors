@@ -178,7 +178,7 @@ export async function convertLegacyFiles(inputs, output, options = {}) {
   addLegacyRuntimeLayers(records, runtime.models);
   const blockIds = listBlockIds(await listJar(clientJar));
   const blockFamilies = await addLegacyBlockLayers(records, blockIds);
-  const textures = await addTextures(records, { jar: clientJar, version: entry.id, cache, offline, validate: false });
+  const textures = await addTextures(records, { jar: clientJar, rendererTextures: runtime.textures, version: entry.id, cache, offline, validate: false });
   await applyLegacyPasses(records);
   const blocks = expandBlocks(blockFamilies, records, blockIds);
   const missing = new Map(textures.report.missing.map(finding => [`${finding.id}#${finding.layer}`, finding]));
