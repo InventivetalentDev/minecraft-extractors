@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { addLegacyRuntimeLayers, convertLegacy, convertModel } from '../../extractors/entity-models/convert-legacy.js';
+import { convertModel } from '../../extractors/entity-models/legacy-extract.js';
 import { validateModel } from '../../extractors/entity-models/lib.js';
 import { applyLegacyPasses } from '../../extractors/entity-models/legacy-passes.js';
 import { legacyAnimationRequests } from '../../extractors/entity-models/legacy-animations.js';
@@ -13,6 +13,11 @@ test('legacy armor copies its body controller and lectern books remain static', 
   const requests = legacyAnimationRequests(inventory);
   assert.ok(!requests.some(request => request.model === 'minecraft:lectern'));
   assert.ok(requests.some(request => request.model === 'minecraft:enchanting_table' && request.clips.idle));
+  for (const id of ['guardian', 'elder_guardian']) {
+    const request = requests.find(request => request.model === `minecraft:${id}`);
+    assert.ok(request);
+    assert.equal(request.layer, undefined);
+  }
   for (const id of ids) {
     const main = requests.find(request => request.model === `minecraft:${id}` && !request.layer);
     for (const layer of ['inner_armor', 'outer_armor']) {
@@ -25,7 +30,7 @@ test('legacy armor copies its body controller and lectern books remain static', 
   }
 });
 
-test('converts a legacy trident with a mirrored child to one main layer', () => {
+test('converts runtime trident parts with a mirrored child to one main layer', () => {
   const part = {
     textureWidth: 32,
     textureHeight: 32,
@@ -66,11 +71,6 @@ test('converts a legacy trident with a mirrored child to one main layer', () => 
     pose: { offset: [1, 2, 3], rotation: [0.25, -0.5, 1] },
     cubes: [{ origin: [1.5, -3, -0.5], size: [1, 4, 1], uv: [4, 3], mirror: true }],
     children: {},
-  });
-  assert.deepEqual(convertLegacy({ 'minecraft:trident': { trident: part } }, {}), {
-    records: [model],
-    skipped: 0,
-    mixedTextureSizes: 0,
   });
 });
 
@@ -116,50 +116,23 @@ test('inherits and resets a legacy part texture override through its children', 
 });
 
 
-test('adds animation hierarchies without changing legacy part names or geometry', () => {
+test('keeps a field-named runtime child once under its parent', () => {
   const part = {
     textureWidth: 16, textureHeight: 16, textureOffsetU: 0, textureOffsetV: 0,
     pivotX: 0, pivotY: 0, pivotZ: 0, pitch: 0, yaw: 0, roll: 0, mirror: false,
     cubes: [{ minX: 0, minY: 0, minZ: 0, maxX: 1, maxY: 1, maxZ: 1 }], children: [],
   };
-  const parent = { ...part, children: [{ ...part, name: 'tail' }] };
-  const original = convertModel('example:mob', { body: parent });
-  const expected = structuredClone(original);
-  const records = [original];
-  addLegacyRuntimeLayers(records, { 'example:mob': { main: { body: { ...parent, pivotY: 24 } }, animated: { body: parent } } });
-  assert.deepEqual(original.layers.main, expected.layers.main);
-  assert.deepEqual(Object.keys(original.layers.main.root.children.body.children), ['0']);
-  assert.deepEqual(Object.keys(original.layers.animated.root.children.body.children), ['tail']);
-  assert.equal(original.passes, undefined);
-  const lectern = convertModel('minecraft:lectern', { cover: part });
-  const cubes = structuredClone(lectern.layers.main.root.children.cover.cubes);
-  addLegacyRuntimeLayers([lectern], { 'minecraft:lectern': { main: { cover: { ...part, yaw: 1.5 } } } });
-  assert.deepEqual(lectern.layers.main.root.children.cover.pose.rotation, [0, 1.5, 0]);
-  assert.deepEqual(lectern.layers.main.root.children.cover.cubes, cubes);
+  const jaw = { ...part, name: 'jaw', pivotY: 4 };
+  const model = convertModel('example:skull', { head: { ...part, children: [jaw] } });
+  assert.deepEqual(Object.keys(model.layers), ['main']);
+  assert.deepEqual(Object.keys(model.layers.main.root.children), ['head']);
+  const head = model.layers.main.root.children.head;
+  assert.deepEqual(Object.keys(head.children), ['jaw']);
+  assert.deepEqual(head.children.jaw.pose.offset, [0, 4, 0]);
+  assert.deepEqual(head.children.jaw.children, {});
 });
 
-test('adds a runtime child part only inside its parent unless the dump lists it at the root', () => {
-  const part = {
-    textureWidth: 16, textureHeight: 16, textureOffsetU: 0, textureOffsetV: 0,
-    pivotX: 0, pivotY: 0, pivotZ: 0, pitch: 0, yaw: 0, roll: 0, mirror: false,
-    cubes: [{ minX: 0, minY: 0, minZ: 0, maxX: 1, maxY: 1, maxZ: 1 }], children: [],
-  };
-  const jaw = { ...part, pivotY: 4, nested: true };
-  const runtime = { main: { head: { ...part, children: [jaw] }, jaw } };
-  const added = [];
-  addLegacyRuntimeLayers(added, { 'example:skull': runtime });
-  assert.deepEqual(Object.keys(added[0].layers.main.root.children), ['head']);
-  assert.deepEqual(added[0].layers.main.root.children.head.children['0'].pose.offset, [0, 4, 0]);
-  const listed = convertModel('example:skull', { head: part, jaw: part });
-  const partial = convertModel('example:skull', { head: part });
-  addLegacyRuntimeLayers([listed], { 'example:skull': runtime });
-  addLegacyRuntimeLayers([partial], { 'example:skull': runtime });
-  assert.deepEqual(Object.keys(listed.layers.main.root.children), ['head', 'jaw']);
-  assert.deepEqual(listed.layers.main.root.children.jaw.pose.offset, [0, 0, 0]);
-  assert.deepEqual(Object.keys(partial.layers.main.root.children), ['head']);
-});
-
-test('uses recovered per-cube UV, dilation and mirror for newly extracted parts', () => {
+test('uses per-cube UV, dilation and mirror from runtime parts', () => {
   const part = {
     textureWidth: 64, textureHeight: 32, textureOffsetU: 20, textureOffsetV: 25,
     pivotX: 0, pivotY: 0, pivotZ: 0, pitch: 0, yaw: 0, roll: 0, mirror: true,
@@ -174,27 +147,6 @@ test('uses recovered per-cube UV, dilation and mirror for newly extracted parts'
 });
 
 
-test('rebases runtime part texture inheritance onto the preserved legacy layer size', () => {
-  const part = {
-    textureWidth: 16, textureHeight: 16, textureOffsetU: 0, textureOffsetV: 0,
-    pivotX: 0, pivotY: 0, pivotZ: 0, pitch: 0, yaw: 0, roll: 0, mirror: false,
-    cubes: [{ minX: 0, minY: 0, minZ: 0, maxX: 1, maxY: 1, maxZ: 1 }], children: [],
-  };
-  const record = convertModel('example:mob', { body: part });
-  const original = structuredClone(record.layers.main.root.children.body);
-  const large = { ...part, textureWidth: 64, textureHeight: 32 };
-  const small = { ...part, children: [{ ...large, children: [part] }] };
-  addLegacyRuntimeLayers([record], { 'example:mob': { main: { body: large, small, large } } });
-  assert.deepEqual(record.layers.main.texture, [16, 16]);
-  assert.deepEqual(record.layers.main.root.children.body, original);
-  const added = record.layers.main.root.children;
-  assert.equal(Object.hasOwn(added.small, 'texture'), false);
-  assert.deepEqual(added.small.children['0'].texture, [64, 32]);
-  assert.deepEqual(added.small.children['0'].children['0'].texture, [16, 16]);
-  assert.deepEqual(added.large.texture, [64, 32]);
-  assert.doesNotThrow(() => validateModel({ ...record, transform: [] }));
-});
-
 test('preserves runtime models with non-main layers through legacy pass assignment', async () => {
   const part = {
     textureWidth: 16, textureHeight: 16, textureOffsetU: 0, textureOffsetV: 0,
@@ -202,13 +154,11 @@ test('preserves runtime models with non-main layers through legacy pass assignme
     cubes: [{ minX: 0, minY: 0, minZ: 0, maxX: 1, maxY: 1, maxZ: 1 }], children: [],
   };
   for (const [id, layer] of [
-    ['armor_stand', 'animated'], ['shulker', 'animated'], ['trident', 'animated'],
-    ['player', 'animated'], ['wolf', 'animated'], ['creeper', 'animated'], ['conduit', 'animated'],
     ['conduit', 'shell'], ['chest', 'single'], ['sheep', 'fur'],
   ]) {
-    const records = [];
-    addLegacyRuntimeLayers(records, { [`minecraft:${id}`]: { main: {}, [layer]: { body: part } } });
-    assert.equal(records.length, 1);
+    const record = convertModel(`minecraft:${id}`, { body: part });
+    record.layers = { [layer]: record.layers.main };
+    const records = [record];
     assert.deepEqual(Object.keys(records[0].layers), [layer]);
     const geometry = structuredClone(records[0].layers[layer].root);
     await applyLegacyPasses(records);

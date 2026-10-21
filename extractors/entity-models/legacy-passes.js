@@ -43,10 +43,6 @@ export async function applyLegacyPasses(records) {
       passes.push(pass);
     }
     if (passes.length) model.passes = passes;
-    if (model.layers.animated && main) {
-      if (main.textureLocation) model.layers.animated.textureLocation = main.textureLocation;
-      if (main.render) model.layers.animated.render = main.render;
-    }
     for (const name of ['single', 'shell']) if (model.layers[name] && main?.textureLocation)
       model.layers[name].textureLocation = main.textureLocation;
     if (model.layers.saddle && ['pig', 'strider'].includes(id)) model.layers.saddle.textureLocation = `minecraft:textures/entity/${id}/${id}_saddle.png`;

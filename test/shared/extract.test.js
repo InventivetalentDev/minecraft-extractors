@@ -15,7 +15,6 @@ async function temporary(t) {
 
 test('combined extraction rejects invalid output and dataset combinations before preparing a runtime', async () => {
   await assert.rejects(extractDatasets('1.21.11', '/tmp/extraction-output', { fixtures: '/tmp/extraction-output/fixtures.json' }), /outside the output/);
-  await assert.rejects(extractDatasets('1.16.5', '/tmp/extraction-output'), /entity extraction requires --entity-dump/);
   await assert.rejects(extractDatasets('1.21.11', '/tmp/extraction-output', { dataset: 'entity-models', fixtures: '/tmp/fixtures.json' }), /requires minerender-data/);
 });
 
@@ -43,10 +42,10 @@ test('supported registry versions and other entity-only versions reach runtime p
   for (const version of SUPPORTED_VERSIONS) {
     const output = path.join(directory, version);
     await assert.rejects(extractDatasets(version, output, { ...options, dataset: 'minerender-data' }), /Offline cache miss/);
-    if (version !== '1.16.5') await assert.rejects(extractDatasets(version, output, options), /Offline cache miss/);
+    await assert.rejects(extractDatasets(version, output, options), /Offline cache miss/);
     await assert.rejects(extractRegistry(version, output, options), /Offline cache miss/);
   }
-  for (const version of ['1.20.1', '26.1.2']) {
+  for (const version of ['1.16.5', '1.20.1', '26.1.2']) {
     await assert.rejects(extractDatasets(version, path.join(directory, version), { ...options, dataset: 'entity-models' }), /Offline cache miss/);
   }
   assert.deepEqual(await readdir(directory), []);
