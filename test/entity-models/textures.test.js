@@ -53,6 +53,14 @@ test('explicit overrides take the moved and baby assets of a later release', asy
   assert.equal(versionTexture(records[1].layers.main.textureLocation, true, entries), 'minecraft:textures/entity/cat/cat_black_baby.png');
 });
 
+test('renderer textures apply before overrides', async () => {
+  const records = [model('player_head'), model('zombie_head')];
+  const steve = 'minecraft:textures/entity/player/slim/steve.png';
+  await addTextures(records, { rendererTextures: { 'minecraft:player_head': steve, 'minecraft:zombie_head': steve }, validate: false });
+  assert.equal(records[0].layers.main.textureLocation, steve);
+  assert.equal(records[1].layers.main.textureLocation, 'minecraft:textures/entity/zombie/zombie.png');
+});
+
 test('baby models retain suffixes when matching stems and inheriting textures', async () => {
   const records = ['happy_ghast_ropes', 'happy_ghast_baby_ropes', 'villager_no_hat', 'villager_baby_no_hat',
     'wolf_armor', 'wolf_baby_armor', 'wolf_babylon'].map(model);

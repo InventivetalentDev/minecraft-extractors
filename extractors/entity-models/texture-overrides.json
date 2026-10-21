@@ -54,7 +54,6 @@
   },
   "piglin_head": "minecraft:textures/entity/piglin/piglin.png",
   "player": null,
-  "player_head": null,
   "player_slim": null,
   "rabbit": "minecraft:textures/entity/rabbit/brown.png",
   "shield": null,

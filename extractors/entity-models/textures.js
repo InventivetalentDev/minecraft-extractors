@@ -328,10 +328,17 @@ export async function validateTextures(records, version, sources, { cache = DEFA
   }
 }
 
-export async function addTextures(records, { jar, entries, modelLayers, version, cache, offline, validate = true } = {}) {
+export async function addTextures(records, { jar, entries, modelLayers, rendererTextures = {}, version, cache, offline, validate = true } = {}) {
   for (const model of records) for (const value of Object.values(model.layers)) delete value.textureLocation;
   const { report, sources, missing, textureEntries } = jar ? await extractTextures({ jar, entries, records, modelLayers })
     : { report: { pairings: [], unpaired: [] }, sources: new Map(), missing: applyStemTextures([], records) };
+  // Renderers take these from other classes, such as DefaultPlayerSkin, that renderer pairing does not read,
+  // so the Java extractors read the values from the renderers at runtime.
+  for (const model of records) {
+    if (!rendererTextures[model.id] || !model.layers.main) continue;
+    model.layers.main.textureLocation = rendererTextures[model.id];
+    sources.set(key(model.id, 'main'), 'renderer');
+  }
   await applyOverrides(records, { sources });
   inheritBabyTextures(records, sources);
   // Overrides name the paths of the release they were reviewed on, so they take the moved and baby assets too.

@@ -90,6 +90,13 @@ public class LegacyModels {
         Map<String, String> skullIds = Map.of("SKELETON", "skeleton_skull", "WITHER_SKELETON", "wither_skeleton_skull",
             "ZOMBIE", "zombie_head", "CREEPER", "creeper_head", "DRAGON", "dragon_skull", "PLAYER", "player_head");
         for (var entry : ((Map<?, ?>) skullModels.get(null)).entrySet()) addRenderer(models, "minecraft:" + skullIds.get(entry.getKey().toString()), entry.getValue());
+        // A player head without a profile draws the renderer's PLAYER texture.
+        Field skullTextures = skullRenderer.getDeclaredField("TEXTURES");
+        skullTextures.setAccessible(true);
+        Map<String, Object> textures = new TreeMap<>();
+        for (var entry : ((Map<?, ?>) skullTextures.get(null)).entrySet()) {
+            if (entry.getKey().toString().equals("PLAYER")) textures.put("minecraft:" + skullIds.get("PLAYER"), entry.getValue().toString());
+        }
         // DragonHeadEntityModel inherits SkullEntityModel's cube but its render method draws only its own head.
         models.get("minecraft:dragon_skull").get("main").parts.remove("skull");
         for (var model : models.values()) {
@@ -163,7 +170,7 @@ public class LegacyModels {
                 "modelIds", List.of(id), "layer", layerName, "animations", clips));
         }
         Files.writeString(Path.of(args[1]), new GsonBuilder().disableHtmlEscaping().create().toJson(
-            object("models", geometry, "inventory", inventory, "animations", animations)) + "\n");
+            object("models", geometry, "inventory", inventory, "animations", animations, "textures", textures)) + "\n");
     }
 
     private static void addRenderer(Map<String, Map<String, Layer>> models, String id, Object renderer) throws Exception {

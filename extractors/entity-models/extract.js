@@ -49,12 +49,12 @@ export async function extract(version, output, options = {}) {
   try {
     await run(java, ['-Djava.awt.headless=true', '--class-path', [remapped, ...libraries].join(path.delimiter),
       fileURLToPath(new URL('./Extract.java', import.meta.url)), extracted], { cwd: directory });
-    const { models: records, modelLayers } = JSON.parse(await readFile(extracted, 'utf8'));
+    const { models: records, modelLayers, textures: rendererTextures } = JSON.parse(await readFile(extracted, 'utf8'));
     adapter.normalizeModels(records);
     await applyTransforms(records, entry.id);
     await addClassicBlockModels(records, entry.id);
     console.log(`Resolving Minecraft ${entry.id} textures...`);
-    const textures = await addTextures(records, { jar: remapped, entries, modelLayers, version: entry.id, cache, offline });
+    const textures = await addTextures(records, { jar: remapped, entries, modelLayers, rendererTextures, version: entry.id, cache, offline });
     await applyPasses(records, entry.id, { cache, offline, textureEntries: textures.textureEntries });
     const blocks = expandBlocks(await loadBlockFamilies(), records, listBlockIds(entries));
     await validateTextures(blockTextureRecords(blocks), entry.id, new Map(), { cache, offline });

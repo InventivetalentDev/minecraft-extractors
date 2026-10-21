@@ -17,7 +17,9 @@ import net.minecraft.client.model.geom.builders.LayerDefinition;
 import net.minecraft.client.model.geom.builders.MeshDefinition;
 import net.minecraft.client.model.geom.builders.PartDefinition;
 import net.minecraft.client.model.geom.builders.UVPair;
+import net.minecraft.client.renderer.blockentity.SkullBlockRenderer;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.block.SkullBlock;
 
 public class Extract {
     public static void main(String[] args) {
@@ -49,8 +51,13 @@ public class Extract {
                     "id", accessor(location, "getModel", "model").toString(),
                     "layer", accessor(location, "getLayer", "layer").toString()));
             }
+            // A player head without a profile draws the renderer's PLAYER texture.
+            Field skins = SkullBlockRenderer.class.getDeclaredField("SKIN_BY_TYPE");
+            skins.setAccessible(true);
+            Map<String, Object> textures = object(accessor(ModelLayers.PLAYER_HEAD, "getModel", "model").toString(),
+                ((Map<?, ?>) skins.get(null)).get(SkullBlock.Types.PLAYER).toString());
             String json = new GsonBuilder().disableHtmlEscaping().create().toJson(
-                object("models", result, "modelLayers", modelLayers));
+                object("models", result, "modelLayers", modelLayers, "textures", textures));
             Files.writeString(Path.of(args[0]), json + "\n", StandardCharsets.UTF_8);
         } catch (Throwable error) {
             while (error.getCause() != null) {
