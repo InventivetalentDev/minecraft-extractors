@@ -273,7 +273,8 @@ public class LegacyModels {
         Object previous = layer.owners.get(name);
         if (previous != null && previous != owner && previous.getClass() != owner.getClass()) {
             name = className(owner.getClass()) + "_" + name;
-            if (layer.parts.containsKey(name)) throw new IllegalArgumentException("Duplicate part name: " + name);
+            Object prefixed = layer.owners.get(name);
+            if (prefixed != null && prefixed.getClass() != owner.getClass()) throw new IllegalArgumentException("Duplicate part name: " + name);
         }
         layer.parts.put(name, part);
         layer.owners.put(name, owner);
