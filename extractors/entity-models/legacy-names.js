@@ -16,7 +16,8 @@ function tiny(text, namespaces) {
 }
 
 export function legacyPartNames({ yarn, intermediary, mojang }) {
-  const named = tiny(yarn, 'intermediary\tnamed');
+  const named = new Map([...tiny(yarn, 'intermediary\tnamed')].map(([name, type]) => [type.name,
+    { name, fields: new Map([...type.fields].map(([name, field]) => [field, name])) }]));
   const official = tiny(intermediary, 'official\tintermediary');
   const mapped = new Map();
   let current;
@@ -34,17 +35,16 @@ export function legacyPartNames({ yarn, intermediary, mojang }) {
     }
   }
   const result = {};
-  for (const [name, type] of named) {
-    if (!name.startsWith('net/minecraft/client/')) continue;
-    const obfuscated = official.get(type.name);
-    const mojangClass = mapped.get(obfuscated?.name);
-    if (!mojangClass) continue;
+  for (const [name, type] of official) {
+    const mojangClass = mapped.get(type.name);
+    if (!mojangClass?.name.startsWith('net.minecraft.client.')) continue;
+    const yarnClass = named.get(name);
     const fields = {};
-    for (const [field, intermediaryField] of type.fields) {
-      const mojangField = mojangClass.fields.get(obfuscated.fields.get(intermediaryField));
-      if (mojangField !== undefined) fields[field] = snake(mojangField);
+    for (const [field, obfuscatedField] of type.fields) {
+      const mojangField = mojangClass.fields.get(obfuscatedField);
+      if (mojangField !== undefined) fields[yarnClass?.fields.get(field) ?? field] = snake(mojangField);
     }
-    result[name.replaceAll('/', '.')] = { class: snake(mojangClass.name.split(/[.$]/).at(-1)), fields };
+    result[(yarnClass?.name ?? name).replaceAll('/', '.')] = { class: snake(mojangClass.name.split(/[.$]/).at(-1)), fields };
   }
   return result;
 }

@@ -19,18 +19,24 @@ test('legacy part names join client classes and fields through intermediary to M
     ].join('\n'),
     intermediary: ['tiny\t2\t0\tofficial\tintermediary',
       'c\ta\tnet/minecraft/class_1', '\tf\tLb;\tx\tfield_1', '\tf\tI\ty\tfield_2',
+      '\tf\tI\tz\tfield_5',
       'c\tb\tnet/minecraft/class_2', '\tf\tI\tx\tfield_3',
       'c\tc\tnet/minecraft/class_3', '\tf\tI\tx\tfield_4',
+      'c\td\tnet/minecraft/class_5', '\tf\tI\tx\tfield_6',
     ].join('\n'),
     mojang: ['# -> ignored:', 'net.minecraft.client.renderer.BellRenderer -> a:',
       '    net.minecraft.client.model.ModelPart bellBody -> x', '    1:2:void ring(float) -> x',
+      '    int bellMouth -> z',
       'net.minecraft.client.renderer.SignRenderer$SignModel -> b:', '    int signBoard -> x',
       'net.minecraft.server.ServerModel -> c:', '    int serverPart -> x',
+      'net.minecraft.client.model.UnnamedModel -> d:', '    int lid -> x',
     ].join('\n'),
   });
   assert.deepEqual(names, {
-    'net.minecraft.client.render.BellRenderer': { class: 'bell_renderer', fields: { field_20816: 'bell_body' } },
+    'net.minecraft.client.render.BellRenderer': { class: 'bell_renderer',
+      fields: { field_20816: 'bell_body', field_5: 'bell_mouth' } },
     'net.minecraft.client.render.SignRenderer$SignModel': { class: 'sign_model', fields: { field: 'sign_board' } },
+    'net.minecraft.class_5': { class: 'unnamed_model', fields: { field_6: 'lid' } },
   });
 });
 
