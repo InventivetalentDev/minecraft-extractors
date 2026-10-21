@@ -37,7 +37,7 @@ Version support belongs to each extractor. Registry extraction supports **1.16.5
 
 Entity extraction retains the reviewed 1.17.1, 1.20.1, 1.21.11, and 26.1.2 adapters, native extraction for other compatible releases, and the 1.16.5 Yarn runtime path. A successful native-only run does not include unreviewed procedural animations or block-model variants. Extraction always uses the requested version's runtime; it does not substitute another version's output.
 
-Minecraft 1.16.5 entity models come from the Yarn-mapped client. Use the same extraction command as for other versions:
+Minecraft 1.16.5 entity models come from the Yarn-mapped client. Part names use Mojang's official 1.16.5 field names in snake_case. Use the same extraction command as for other versions:
 
 ```sh
 node tools/extract.js --version 1.16.5 --dataset entity-models --output out/1.16.5

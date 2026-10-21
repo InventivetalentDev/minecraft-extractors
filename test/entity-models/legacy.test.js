@@ -4,6 +4,50 @@ import { convertModel } from '../../extractors/entity-models/legacy-extract.js';
 import { validateModel } from '../../extractors/entity-models/lib.js';
 import { applyLegacyPasses } from '../../extractors/entity-models/legacy-passes.js';
 import { legacyAnimationRequests } from '../../extractors/entity-models/legacy-animations.js';
+import { legacyPartNames } from '../../extractors/entity-models/legacy-names.js';
+
+test('legacy part names join client classes and fields through intermediary to Mojang', () => {
+  const names = legacyPartNames({
+    yarn: ['tiny\t2\t0\tintermediary\tnamed',
+      'c\tnet/minecraft/class_1\tnet/minecraft/client/render/BellRenderer',
+      '\tf\tLnet/minecraft/class_2;\tfield_1\tfield_20816', '\tf\tI\tfield_2\tunmapped',
+      '\tm\t()V\tmethod_1\tring', '\t\tp\t0\tparameter', '\tc\tClass comment',
+      'c\tnet/minecraft/class_2\tnet/minecraft/client/render/SignRenderer$SignModel',
+      '\tf\tI\tfield_3\tfield',
+      'c\tnet/minecraft/class_3\tnet/minecraft/server/ServerModel', '\tf\tI\tfield_4\tpart',
+      'c\tnet/minecraft/class_4\tnet/minecraft/client/render/Unmapped',
+    ].join('\n'),
+    intermediary: ['tiny\t2\t0\tofficial\tintermediary',
+      'c\ta\tnet/minecraft/class_1', '\tf\tLb;\tx\tfield_1', '\tf\tI\ty\tfield_2',
+      'c\tb\tnet/minecraft/class_2', '\tf\tI\tx\tfield_3',
+      'c\tc\tnet/minecraft/class_3', '\tf\tI\tx\tfield_4',
+    ].join('\n'),
+    mojang: ['# -> ignored:', 'net.minecraft.client.renderer.BellRenderer -> a:',
+      '    net.minecraft.client.model.ModelPart bellBody -> x', '    1:2:void ring(float) -> x',
+      'net.minecraft.client.renderer.SignRenderer$SignModel -> b:', '    int signBoard -> x',
+      'net.minecraft.server.ServerModel -> c:', '    int serverPart -> x',
+    ].join('\n'),
+  });
+  assert.deepEqual(names, {
+    'net.minecraft.client.render.BellRenderer': { class: 'bell_renderer', fields: { field_20816: 'bell_body' } },
+    'net.minecraft.client.render.SignRenderer$SignModel': { class: 'sign_model', fields: { field: 'sign_board' } },
+  });
+});
+
+test('legacy part names reject either wrong tiny header', () => {
+  const mappings = { yarn: 'tiny\t2\t0\tintermediary\tnamed',
+    intermediary: 'tiny\t2\t0\tofficial\tintermediary', mojang: '' };
+  for (const key of ['yarn', 'intermediary']) {
+    assert.throws(() => legacyPartNames({ ...mappings, [key]: 'tiny\t2\t0\tofficial\tnamed' }), /Invalid tiny header/);
+  }
+});
+
+test('legacy part names reject duplicate obfuscated fields in one Mojang class', () => {
+  assert.throws(() => legacyPartNames({ yarn: 'tiny\t2\t0\tintermediary\tnamed',
+    intermediary: 'tiny\t2\t0\tofficial\tintermediary',
+    mojang: 'net.minecraft.client.model.Model -> a:\n    int first -> x\n    int second -> x',
+  }), /Duplicate Mojang field: net\.minecraft\.client\.model\.Model\.x/);
+});
 
 test('legacy armor copies its body controller and lectern books remain static', () => {
   const ids = ['piglin', 'piglin_brute', 'zombified_piglin', 'zombie', 'zombie_villager', 'skeleton', 'player', 'player_slim'];

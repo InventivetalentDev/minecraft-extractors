@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { download, downloadClient, exists, loadVersion, sha1 } from '../../lib/download.js';
 import { legacyAnimationRequests } from './legacy-animations.js';
+import { legacyPartNames } from './legacy-names.js';
 import { downloadLibraries, javaTool } from '../../lib/runtime.js';
 
 const run = promisify(execFile);
@@ -21,7 +22,7 @@ export async function extractLegacyData(options) {
   try {
     const output = path.join(runtime.directory, 'models.json');
     const args = ['-Djava.awt.headless=true', '--class-path', runtime.classpath,
-      fileURLToPath(new URL('./LegacyModels.java', import.meta.url)), '-', output];
+      fileURLToPath(new URL('./LegacyModels.java', import.meta.url)), '-', output, runtime.names];
     await new Promise((resolve, reject) => {
       let failure;
       let sent = false;
@@ -54,7 +55,7 @@ export async function extractLegacyData(options) {
   }
 }
 
-// Yarn's field names preserve the bone names in the original 1.16.5 dictionaries.
+// The runtime is Yarn-mapped; part names come from Mojang's 1.16.5 mappings.
 export async function prepareLegacyRuntime({ cache, offline = false, legacyCache = path.join(cache, 'yarn-1.16.5'),
   metadata, clientJar }) {
   cache = path.resolve(cache);
@@ -76,20 +77,34 @@ export async function prepareLegacyRuntime({ cache, offline = false, legacyCache
   await mkdir(versionDirectory, { recursive: true });
   const directory = await mkdtemp(path.join(versionDirectory, 'runtime-'));
   try {
+    for (const name of ['intermediary', 'yarn']) {
+      const cwd = path.join(directory, name);
+      await mkdir(cwd);
+      await run(javaTool('jar'), ['xf', path.join(legacyCache, `${name}.jar`), 'mappings/mappings.tiny'], { cwd });
+    }
+    const mappings = metadata.downloads.client_mappings;
+    if (!mappings.url || !/^[a-f0-9]{40}$/.test(mappings.sha1)) throw new Error('Invalid client mappings for Minecraft 1.16.5');
+    const mappingFile = path.join(versionDirectory, `mappings-${mappings.sha1}.txt`);
+    await download(mappings.url, mappingFile, mappings.sha1, offline);
+    const names = path.join(directory, 'names.json');
+    await writeFile(names, JSON.stringify(legacyPartNames({
+      yarn: await readFile(path.join(directory, 'yarn/mappings/mappings.tiny'), 'utf8'),
+      intermediary: await readFile(path.join(directory, 'intermediary/mappings/mappings.tiny'), 'utf8'),
+      mojang: await readFile(mappingFile, 'utf8'),
+    })));
     if (!cached) {
       let input = clientJar;
       for (const [name, from, to] of [['intermediary', 'official', 'intermediary'], ['yarn', 'intermediary', 'named']]) {
         const output = path.join(directory, `${to}.jar`);
-        await run(javaTool('jar'), ['xf', path.join(legacyCache, `${name}.jar`), 'mappings/mappings.tiny'], { cwd: directory });
         await run(javaTool('java'), ['-jar', path.join(legacyCache, 'remapper.jar'), input, output,
-          path.join(directory, 'mappings/mappings.tiny'), from, to, ...libraries, '--fixPackageAccess'],
+          path.join(directory, name, 'mappings/mappings.tiny'), from, to, ...libraries, '--fixPackageAccess'],
         { cwd: directory, maxBuffer: 8 * 1024 * 1024 });
         input = output;
       }
       await rename(input, named);
       await writeFile(checksum, sha1(await readFile(named)) + '\n');
     }
-    return { classpath: [named, ...libraries].join(path.delimiter), directory,
+    return { classpath: [named, ...libraries].join(path.delimiter), directory, names,
       dispose: () => rm(directory, { recursive: true, force: true }) };
   } catch (error) {
     await rm(directory, { recursive: true, force: true });
